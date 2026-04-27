@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { FileAudio, FileImage, FileText, Music, Sparkles, Upload } from 'lucide-react';
+import { FileAudio, FileImage, FileText, Music, Sparkles, Upload, X } from 'lucide-react';
 import { inspectImportFile } from '../../services/import/FileImportService';
 
 interface ImportCenterProps {
@@ -7,6 +7,7 @@ interface ImportCenterProps {
   onOpenPrompt: () => void;
   onLoadDemo: () => void;
   onShowOmrInfo: (message: string) => void;
+  onClose?: () => void;
 }
 
 function ActionCard({
@@ -34,7 +35,7 @@ function ActionCard({
   );
 }
 
-export function ImportCenter({ onOpenFile, onOpenPrompt, onLoadDemo, onShowOmrInfo }: ImportCenterProps) {
+export function ImportCenter({ onOpenFile, onOpenPrompt, onLoadDemo, onShowOmrInfo, onClose }: ImportCenterProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const openFilePicker = () => fileInputRef.current?.click();
@@ -53,9 +54,19 @@ export function ImportCenter({ onOpenFile, onOpenPrompt, onLoadDemo, onShowOmrIn
   };
 
   return (
-    <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none px-6">
-      <div className="w-full max-w-4xl pointer-events-auto rounded-3xl border border-slate-700/70 bg-[#0f172a]/90 shadow-2xl p-6 backdrop-blur-sm">
-        <div className="flex items-start gap-4 mb-5">
+    <div className="absolute inset-0 z-30 flex items-center justify-center pointer-events-none px-6 bg-slate-950/35 backdrop-blur-[1px]">
+      <div className="w-full max-w-4xl pointer-events-auto rounded-3xl border border-slate-700/70 bg-[#0f172a]/95 shadow-2xl p-6 backdrop-blur-sm relative">
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="absolute right-4 top-4 p-1.5 rounded-lg text-slate-500 hover:text-white hover:bg-slate-800 transition"
+            title="Close"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        )}
+
+        <div className="flex items-start gap-4 mb-5 pr-8">
           <div className="w-12 h-12 rounded-2xl bg-blue-600 flex items-center justify-center text-white shrink-0">
             <Music className="w-6 h-6" />
           </div>
