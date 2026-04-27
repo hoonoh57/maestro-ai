@@ -15,28 +15,36 @@ function PlaceholderMode({ title, phase }: { title: string; phase: number }) {
 export function MainViewport() {
   const mode = useUIStore((s) => s.mode);
 
-  switch (mode) {
-    case 'editor':
-      return <ScoreCanvas />;
-    case 'test':
-      return <TestConsole />;
-    case 'practice':
-      return <PlaceholderMode title="Practice Mode" phase={6} />;
-    case 'backing':
-      return <PlaceholderMode title="Backing Track" phase={5} />;
-    case 'busking':
-      return <PlaceholderMode title="Busking Mode" phase={4} />;
-    case 'mixer':
-      return <PlaceholderMode title="Mixer" phase={7} />;
-    default:
-      return <ScoreCanvas />;
-  }
-}
+  // ScoreCanvas는 항상 마운트 (engine 유지), 다른 모드에서는 숨김
+  const showScore = mode === 'editor';
+  const showTest = mode === 'test';
 
-function LoadingPlaceholder() {
   return (
-    <div className="flex-1 flex items-center justify-center">
-      <div className="text-slate-500 text-sm">Loading...</div>
+    <div className="flex-1 flex flex-col overflow-hidden relative">
+      {/* ScoreCanvas: 항상 DOM에 존재, 숨길 때는 뒤로 보냄 */}
+      <div
+        className="absolute inset-0"
+        style={{
+          zIndex: showScore ? 1 : 0,
+          visibility: showScore ? 'visible' : 'hidden',
+          pointerEvents: showScore ? 'auto' : 'none',
+        }}
+      >
+        <ScoreCanvas />
+      </div>
+
+      {/* Test Console */}
+      {showTest && (
+        <div className="absolute inset-0 z-10">
+          <TestConsole />
+        </div>
+      )}
+
+      {/* Other modes */}
+      {mode === 'practice' && <PlaceholderMode title="Practice Mode" phase={6} />}
+      {mode === 'backing' && <PlaceholderMode title="Backing Track" phase={5} />}
+      {mode === 'busking' && <PlaceholderMode title="Busking Mode" phase={4} />}
+      {mode === 'mixer' && <PlaceholderMode title="Mixer" phase={7} />}
     </div>
   );
 }
