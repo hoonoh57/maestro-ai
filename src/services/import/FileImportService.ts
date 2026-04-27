@@ -8,16 +8,38 @@ export interface FileImportInfo {
   message: string;
 }
 
-const GUITAR_PRO_EXTENSIONS = new Set(['gp', 'gp3', 'gp4', 'gp5', 'gpx']);
+export interface LoadedScoreFile {
+  file: File;
+  info: FileImportInfo;
+  baseName: string;
+}
+
+const GUITAR_PRO_EXTENSIONS = new Set(['gp', 'gp3', 'gp4', 'gp5', 'gp6', 'gp7', 'gp8', 'gpx']);
 const MUSIC_XML_EXTENSIONS = new Set(['musicxml', 'xml', 'mxl']);
-const ALPHATEX_EXTENSIONS = new Set(['atx', 'tex', 'txt']);
+const ALPHATEX_EXTENSIONS = new Set(['atx', 'tex', 'alphatex', 'txt']);
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp']);
+
+export const SCORE_FILE_ACCEPT = [
+  '.gp', '.gp3', '.gp4', '.gp5', '.gp6', '.gp7', '.gp8', '.gpx',
+  '.musicxml', '.xml', '.mxl',
+  '.atx', '.tex', '.alphatex', '.txt',
+  '.pdf', '.png', '.jpg', '.jpeg', '.webp',
+].join(',');
 
 export function getFileExtension(fileName: string): string {
   const cleanName = fileName.trim().toLowerCase();
   const dotIndex = cleanName.lastIndexOf('.');
   if (dotIndex < 0 || dotIndex === cleanName.length - 1) return '';
   return cleanName.slice(dotIndex + 1);
+}
+
+export function getBaseFileName(fileName: string): string {
+  const cleanName = fileName.trim();
+  const slashIndex = Math.max(cleanName.lastIndexOf('/'), cleanName.lastIndexOf('\\'));
+  const onlyName = slashIndex >= 0 ? cleanName.slice(slashIndex + 1) : cleanName;
+  const dotIndex = onlyName.lastIndexOf('.');
+  if (dotIndex <= 0) return onlyName || 'Untitled Score';
+  return onlyName.slice(0, dotIndex) || 'Untitled Score';
 }
 
 export function inspectImportFile(file: File): FileImportInfo {
@@ -78,7 +100,17 @@ export function inspectImportFile(file: File): FileImportInfo {
     extension,
     canLoadDirectly: false,
     displayName: 'Unsupported file',
-    message: 'This file type is not supported yet.',
+    message: extension
+      ? `.${extension} files are not supported yet.`
+      : 'This file has no extension and cannot be imported yet.',
+  };
+}
+
+export function createLoadedScoreFile(file: File): LoadedScoreFile {
+  return {
+    file,
+    info: inspectImportFile(file),
+    baseName: getBaseFileName(file.name),
   };
 }
 
