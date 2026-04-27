@@ -1,5 +1,6 @@
-import { useEffect, useRef, useCallback } from 'react';
-import { engine } from '../core/AlphaTabEngine';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type * as alphaTab from '@coderline/alphatab';
+import { engine, type EngineDiagnostics } from '../core/AlphaTabEngine';
 import { useProjectStore } from '../stores/projectStore';
 import { useTransportStore } from '../stores/transportStore';
 import { useEditorStore } from '../stores/editorStore';
@@ -34,33 +35,62 @@ const DEMO_TEX = `
   3.4 3.4 5.3 5.3
 `.trim();
 
+interface UseAlphaTabResult {
+  engine: typeof engine;
+  importFile: (file: File) => void;
+  diagnostics: EngineDiagnostics;
+  initialized: boolean;
+  lastError: string | null;
+}
+
+function hasRenderableSize(el: HTMLElement): boolean {
+  const rect = el.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+}
+
 export function useAlphaTab(
   containerRef: React.RefObject<HTMLElement | null>,
-  viewportRef: React.RefObject<HTMLElement | null>
-) {
+  viewportRef: React.RefObject<HTMLElement | null>,
+  readyToInit: boolean,
+): UseAlphaTabResult {
   const initialized = useRef(false);
+  const demoLoaded = useRef(false);
+  const retryTimer = useRef<number | null>(null);
+  const [diagnostics, setDiagnostics] = useState<EngineDiagnostics>(() => engine.getDiagnostics());
+  const [lastError, setLastError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const el = containerRef.current;
-    const scroll = viewportRef.current;
+  const refreshDiagnostics = useCallback(() => {
+    setDiagnostics(engine.getDiagnostics());
+  }, []);
 
-    if (!el || !scroll) return;
-    if (initialized.current) return;
+  const clearRetryTimer = useCallback(() => {
+    if (retryTimer.current !== null) {
+      window.clearTimeout(retryTimer.current);
+      retryTimer.current = null;
+    }
+  }, []);
 
-    const rect = el.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) {
-      console.warn('[useAlphaTab] Container has zero size, skipping init');
+  const tryInitialize = useCallback(() => {
+    if (!readyToInit || initialized.current) return;
+
+    const container = containerRef.current;
+    const viewport = viewportRef.current;
+    if (container === null || viewport === null) return;
+
+    if (!hasRenderableSize(container)) {
+      clearRetryTimer();
+      retryTimer.current = window.setTimeout(tryInitialize, 120);
       return;
     }
 
-    initialized.current = true;
-
-    engine.init(el, scroll, {
-      onScoreLoaded: (score) => {
+    const ok = engine.init(container, viewport, {
+      onScoreLoaded: (score: alphaTab.model.Score) => {
         useProjectStore.getState().syncFromScore(score);
+        refreshDiagnostics();
       },
       onPlayerReady: () => {
         useTransportStore.getState().setPlayerReady();
+        refreshDiagnostics();
       },
       onPlayerStateChanged: (state) => {
         useTransportStore.getState().setPlayerState(state);
@@ -78,29 +108,86 @@ export function useAlphaTab(
         useEditorStore.getState().selectNoteFromModel(note);
         engine.playNote(note);
       },
-      onRenderFinished: () => {},
-      onError: (e) => console.error('[alphaTab error]', e),
+      onRenderFinished: () => {
+        refreshDiagnostics();
+      },
+      onError: (e) => {
+        setLastError(e.message);
+        refreshDiagnostics();
+      },
     });
 
-    const timer = setTimeout(() => {
-      engine.loadTex(DEMO_TEX);
-    }, 300);
+    if (!ok) {
+      refreshDiagnostics();
+      clearRetryTimer();
+      retryTimer.current = window.setTimeout(tryInitialize, 180);
+      return;
+    }
 
+    initialized.current = true;
+    refreshDiagnostics();
+
+    if (!demoLoaded.current) {
+      demoLoaded.current = true;
+      window.setTimeout(() => {
+        engine.loadTex(DEMO_TEX);
+        refreshDiagnostics();
+      }, 120);
+    }
+  }, [clearRetryTimer, containerRef, readyToInit, refreshDiagnostics, viewportRef]);
+
+  useEffect(() => {
+    tryInitialize();
+    return () => clearRetryTimer();
+  }, [tryInitialize, clearRetryTimer]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (container === null) return;
+
+    const observer = new ResizeObserver(() => {
+      if (!initialized.current) {
+        tryInitialize();
+        return;
+      }
+      engine.forceLayoutRefresh();
+      refreshDiagnostics();
+    });
+
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [containerRef, refreshDiagnostics, tryInitialize]);
+
+  useEffect(() => {
     return () => {
-      clearTimeout(timer);
+      clearRetryTimer();
       engine.destroy();
       initialized.current = false;
+      demoLoaded.current = false;
     };
-  }, [containerRef.current, viewportRef.current]);
+  }, [clearRetryTimer]);
 
   const importFile = useCallback((file: File) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       const data = e.target?.result;
-      if (data instanceof ArrayBuffer) engine.loadFile(data);
+      if (data instanceof ArrayBuffer) {
+        demoLoaded.current = true;
+        engine.loadFile(data);
+        refreshDiagnostics();
+      }
+    };
+    reader.onerror = () => {
+      setLastError(`Failed to read file: ${file.name}`);
     };
     reader.readAsArrayBuffer(file);
-  }, []);
+  }, [refreshDiagnostics]);
 
-  return { engine, importFile };
+  return {
+    engine,
+    importFile,
+    diagnostics,
+    initialized: diagnostics.initialized,
+    lastError,
+  };
 }
