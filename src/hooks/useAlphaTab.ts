@@ -5,8 +5,9 @@ import { engine, type EngineDiagnostics } from '../core/AlphaTabEngine';
 import { useProjectStore } from '../stores/projectStore';
 import { useTransportStore } from '../stores/transportStore';
 import { useEditorStore } from '../stores/editorStore';
+import { inspectImportFile, readBinaryFile, readTextFile } from '../services/import/FileImportService';
 
-const DEMO_TEX = `
+export const DEMO_TEX = `
 \\title "MaestroAI Demo"
 \\artist "Demo Artist"
 \\tempo 120
@@ -39,6 +40,8 @@ const DEMO_TEX = `
 interface UseAlphaTabResult {
   engine: typeof engine;
   importFile: (file: File) => void;
+  loadTexScore: (tex: string) => void;
+  loadDemoScore: () => void;
   diagnostics: EngineDiagnostics;
   initialized: boolean;
   lastError: string | null;
@@ -70,6 +73,17 @@ export function useAlphaTab(
       retryTimer.current = null;
     }
   }, []);
+
+  const loadTexScore = useCallback((tex: string) => {
+    demoLoaded.current = true;
+    setLastError(null);
+    engine.loadTex(tex);
+    refreshDiagnostics();
+  }, [refreshDiagnostics]);
+
+  const loadDemoScore = useCallback(() => {
+    loadTexScore(DEMO_TEX);
+  }, [loadTexScore]);
 
   const tryInitialize = useCallback(() => {
     if (!readyToInit || initialized.current) return;
@@ -169,24 +183,38 @@ export function useAlphaTab(
   }, [clearRetryTimer]);
 
   const importFile = useCallback((file: File) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const data = e.target?.result;
-      if (data instanceof ArrayBuffer) {
-        demoLoaded.current = true;
+    const info = inspectImportFile(file);
+    if (!info.canLoadDirectly) {
+      setLastError(info.message);
+      return;
+    }
+
+    setLastError(null);
+    demoLoaded.current = true;
+
+    if (info.kind === 'alphatex') {
+      readTextFile(file)
+        .then((text) => {
+          engine.loadTex(text);
+          refreshDiagnostics();
+        })
+        .catch((error: Error) => setLastError(error.message));
+      return;
+    }
+
+    readBinaryFile(file)
+      .then((data) => {
         engine.loadFile(data);
         refreshDiagnostics();
-      }
-    };
-    reader.onerror = () => {
-      setLastError(`Failed to read file: ${file.name}`);
-    };
-    reader.readAsArrayBuffer(file);
+      })
+      .catch((error: Error) => setLastError(error.message));
   }, [refreshDiagnostics]);
 
   return {
     engine,
     importFile,
+    loadTexScore,
+    loadDemoScore,
     diagnostics,
     initialized: diagnostics.initialized,
     lastError,
