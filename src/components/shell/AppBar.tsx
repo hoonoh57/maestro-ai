@@ -16,6 +16,7 @@ const MODES: { id: AppMode; label: string }[] = [
 export function AppBar() {
   const mode = useUIStore((s) => s.mode);
   const setMode = useUIStore((s) => s.setMode);
+  const openImportCenter = useUIStore((s) => s.openImportCenter);
   const projectName = useProjectStore((s) => s.project.name);
   const setProjectName = useProjectStore((s) => s.setProjectName);
   const isDirty = useProjectStore((s) => s.isDirty);
@@ -24,7 +25,6 @@ export function AppBar() {
     handleSave,
     handleLoad,
     handleExportMidi,
-    handleImport,
   } = useFileOperations();
 
   const handleNameChange = useCallback(
@@ -39,7 +39,6 @@ export function AppBar() {
 
   return (
     <header className="h-10 bg-[#0f172a] border-b border-slate-700/60 flex items-center px-3 gap-2 select-none shrink-0">
-      {/* Logo */}
       <div className="flex items-center gap-2 mr-2">
         <Music4 size={18} className="text-blue-500" />
         <span className="text-[13px] font-bold text-slate-200 tracking-tight">
@@ -47,7 +46,6 @@ export function AppBar() {
         </span>
       </div>
 
-      {/* Project name */}
       <input
         type="text"
         value={projectName}
@@ -55,10 +53,8 @@ export function AppBar() {
         className="h-7 w-40 px-2 text-[12px] bg-slate-800/60 border border-slate-700/50 rounded text-slate-300 focus:border-blue-500 focus:outline-none"
       />
 
-      {/* Dirty indicator */}
       {isDirty && <span className="w-2 h-2 rounded-full bg-orange-500" title="Unsaved" />}
 
-      {/* Mode Tabs */}
       <nav className="flex items-center gap-0.5 ml-3">
         {MODES.map((m) => (
           <button
@@ -76,10 +72,8 @@ export function AppBar() {
         ))}
       </nav>
 
-      {/* Spacer */}
       <div className="flex-1" />
 
-      {/* File Operations */}
       <button onClick={handleSave} className={iconBtn} title="Save (Ctrl+S)">
         <Save size={14} /> Save
       </button>
@@ -89,7 +83,7 @@ export function AppBar() {
       <button onClick={handleExportMidi} className={iconBtn} title="Export MIDI">
         <Download size={14} /> Export
       </button>
-      <button onClick={handleImport} className={iconBtn} title="Import File">
+      <button onClick={openImportCenter} className={iconBtn} title="Import / AI Generate">
         <Upload size={14} /> Import
       </button>
     </header>
