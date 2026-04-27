@@ -22,6 +22,12 @@ interface EditorState {
   clearSelection: () => void;
 }
 
+function readBooleanProperty(source: unknown, propertyName: string): boolean {
+  if (source === null || typeof source !== 'object') return false;
+  const record = source as Record<string, unknown>;
+  return record[propertyName] === true;
+}
+
 export const useEditorStore = create<EditorState>((set) => ({
   selectedTool: 'select',
   selectedDuration: 'quarter',
@@ -72,7 +78,7 @@ export const useEditorStore = create<EditorState>((set) => ({
         letRing: note.isLetRing,
         ghost: note.isGhost,
         accent: note.accentuated !== 0,
-        staccato: note.beat.isStaccato ?? false,
+        staccato: readBooleanProperty(note.beat, 'isStaccato'),
       },
     }),
   updateSelectedNote: (patch) =>
