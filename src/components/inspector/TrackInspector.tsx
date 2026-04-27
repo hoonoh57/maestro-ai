@@ -37,8 +37,8 @@ const TRACK_COLORS = [
 
 export function TrackInspector() {
   const selectedTrackIndex = useEditorStore((s) => s.selectedTrackIndex);
-  const tracks = useProjectStore((s) => s.tracks);
-  const updateTrack = useProjectStore((s) => s.updateTrack);
+  const tracks = useProjectStore((s) => s.project.tracks);       // ★ 수정: s.project.tracks
+  const updateTrack = useProjectStore((s) => s.updateTrack);     // ★ 수정: 새로 추가된 메서드
 
   if (selectedTrackIndex === null || !tracks[selectedTrackIndex]) {
     return (
@@ -141,7 +141,7 @@ export function TrackInspector() {
             { value: 'open_g', label: 'Open G (DGDGBD)' },
             { value: 'dadgad', label: 'DADGAD' },
             { value: 'half_step_down', label: 'Half Step Down' },
-            { value: 'custom', label: 'Custom…' },
+            { value: 'custom', label: 'Custom' },
           ]}
           onChange={(v) => set({ tuning: v })}
         />

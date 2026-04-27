@@ -4,7 +4,7 @@ export interface MaestroProject {
   artist?: string;
   bpm: number;
   key: string;
-  timeSignature: string; // "4/4" 형태로 통일
+  timeSignature: string;
   difficulty?: string;
   tracks: MaestroTrack[];
   createdAt: string;
@@ -22,6 +22,11 @@ export interface MaestroTrack {
   solo: boolean;
   collapsed: boolean;
   atTrackIndex?: number;
+  // TrackInspector에서 사용하는 추가 필드
+  clef?: string;
+  capo?: number;
+  tuning?: string;
+  strings?: number;
 }
 
 export type NoteDuration = 'whole' | 'half' | 'quarter' | 'eighth' | 'sixteenth';

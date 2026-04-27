@@ -68,7 +68,7 @@ export class AlphaTabEngine {
         enableElementHighlighting: true,
         soundFont: '/soundfont/sonivox.sf2',
         scrollElement: viewport ?? undefined,
-        scrollMode: 1, // Continuous
+        scrollMode: 2, // Continuous
       },
       notation: {
         notationMode: 0, // GuitarPro

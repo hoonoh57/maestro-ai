@@ -23,17 +23,14 @@ interface ProjectState {
   project: MaestroProject;
   isDirty: boolean;
 
-  // Unified updater
   updateProject: (patch: Partial<MaestroProject>) => void;
   setProject: (p: MaestroProject) => void;
   setProjectName: (name: string) => void;
   setBpm: (bpm: number) => void;
   setKey: (key: string) => void;
 
-  // Track sync from alphaTab
   syncFromScore: (score: alphaTab.model.Score) => void;
 
-  // Track ops
   addTrack: (name: string, instrument: string) => void;
   removeTrack: (id: string) => void;
   duplicateTrack: (id: string) => void;
@@ -42,7 +39,9 @@ interface ProjectState {
   setTrackVolume: (id: string, volume: number) => void;
   setTrackCollapsed: (id: string, collapsed: boolean) => void;
 
-  // Persistence
+  // ★ 새로 추가: TrackInspector용 범용 업데이트
+  updateTrack: (index: number, patch: Partial<MaestroTrack>) => void;
+
   saveToLocal: () => void;
   loadFromLocal: () => boolean;
   markClean: () => void;
@@ -148,6 +147,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   setTrackCollapsed: (id, collapsed) => set((s) => ({
     project: { ...s.project, tracks: s.project.tracks.map(t => t.id === id ? { ...t, collapsed } : t) },
   })),
+
+  // ★ 새로 추가
+  updateTrack: (index, patch) => set((s) => {
+    const tracks = [...s.project.tracks];
+    if (index >= 0 && index < tracks.length) {
+      tracks[index] = { ...tracks[index], ...patch };
+    }
+    return {
+      project: { ...s.project, tracks, updatedAt: new Date().toISOString() },
+      isDirty: true,
+    };
+  }),
 
   saveToLocal: () => {
     const { project } = get();

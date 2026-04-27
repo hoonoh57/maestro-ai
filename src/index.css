@@ -36,16 +36,21 @@ body {
 
 /* ── 현재 마디 배경 (연한 붉은 톤) ── */
 .at-cursor-bar {
-  background: rgba(239, 68, 68, 0.08) !important;
+  background: rgba(239, 68, 68, 0.1) !important;
+  border-left: 2px solid rgba(239, 68, 68, 0.6) !important;
 }
 
 /* ── 비트 위치 세로선: 붉은 점선 ── */
 .at-cursor-beat {
-  background: none !important;
-  width: 2px !important;
-  border-left: 2px dashed #ef4444 !important;
-  opacity: 0.9;
-  box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
+  background: #ef4444 !important;
+  width: 3px !important;
+  border: none !important;
+  opacity: 1 !important;
+  box-shadow: 
+    0 0 8px 2px rgba(239, 68, 68, 0.6),
+    0 0 16px 4px rgba(239, 68, 68, 0.3) !important;
+  transition: none !important;
+  animation: none !important;
 }
 
 /* ── 사용자 선택 영역 ── */

@@ -2,6 +2,9 @@
 // src/components/modes/TestConsole.tsx
 // ─────────────────────────────────────────────────
 
+import { undoManager } from '../../core/UndoManager';
+
+
 import React, { useState, useCallback } from 'react';
 import { Play, CheckCircle2, XCircle, AlertCircle, RefreshCw } from 'lucide-react';
 import { engine } from '../../core/AlphaTabEngine';
@@ -164,17 +167,10 @@ function runAllTests(): TestResult[] {
   });
 
   // ── Undo / Redo ──
-
   test('undo_available', 'Undo manager exists', 'Interaction', () => {
-    // We use a simple UndoManager, not zundo temporal
-    try {
-      const { undoManager } = require('../../core/UndoManager');
-      if (typeof undoManager.undo !== 'function') throw new Error('undo is not a function');
-      if (typeof undoManager.redo !== 'function') throw new Error('redo is not a function');
-      return `UndoManager: canUndo=${undoManager.canUndo}, canRedo=${undoManager.canRedo}`;
-    } catch {
-      return 'UndoManager imported (basic check)';
-    }
+    if (typeof undoManager.undo !== 'function') throw new Error('undo is not a function');
+    if (typeof undoManager.redo !== 'function') throw new Error('redo is not a function');
+    return `UndoManager: canUndo=${undoManager.canUndo}, canRedo=${undoManager.canRedo}`;
   });
 
   // ── UI / DOM ──
