@@ -6,6 +6,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAlphaTab } from '../../hooks/useAlphaTab';
 import { useTransportStore } from '../../stores/transportStore';
+import { useUIStore } from '../../stores/uiStore';
 import { inspectImportFile } from '../../services/import/FileImportService';
 import { ImportCenter } from '../import/ImportCenter';
 import { PromptSongDialog } from '../import/PromptSongDialog';
@@ -22,6 +23,10 @@ export function ScoreCanvas() {
   const [isDragging, setIsDragging] = useState(false);
   const [promptOpen, setPromptOpen] = useState(false);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
+
+  const importCenterVisible = useUIStore((s) => s.importCenterVisible);
+  const openImportCenter = useUIStore((s) => s.openImportCenter);
+  const closeImportCenter = useUIStore((s) => s.closeImportCenter);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -71,7 +76,7 @@ export function ScoreCanvas() {
 
   const showSoundFontOverlay = readyToInit && initialized && !isReady;
   const scoreLoaded = diagnostics.scoreLoadedCount > 0;
-  const showImportCenter = readyToInit && initialized && !scoreLoaded && !showSoundFontOverlay;
+  const showImportCenter = readyToInit && initialized && !showSoundFontOverlay && (!scoreLoaded || importCenterVisible);
   const visibleError = lastError ?? diagnostics.lastError;
 
   const diagnosticText = useMemo(() => {
@@ -85,6 +90,11 @@ export function ScoreCanvas() {
     ].join('  |  ');
   }, [diagnostics, initialized, isReady]);
 
+  const closeImportUi = useCallback(() => {
+    setPromptOpen(false);
+    closeImportCenter();
+  }, [closeImportCenter]);
+
   const openImportFile = useCallback((file: File) => {
     const info = inspectImportFile(file);
     if (!info.canLoadDirectly) {
@@ -93,7 +103,18 @@ export function ScoreCanvas() {
     }
     setInfoMessage(null);
     importFile(file);
-  }, [importFile]);
+    closeImportUi();
+  }, [closeImportUi, importFile]);
+
+  const handleLoadDemo = useCallback(() => {
+    loadDemoScore();
+    closeImportUi();
+  }, [closeImportUi, loadDemoScore]);
+
+  const handleGenerateTex = useCallback((tex: string) => {
+    loadTexScore(tex);
+    closeImportUi();
+  }, [closeImportUi, loadTexScore]);
 
   const onDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -125,6 +146,15 @@ export function ScoreCanvas() {
       onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
+      {scoreLoaded && !showImportCenter && (
+        <button
+          onClick={openImportCenter}
+          className="absolute left-3 top-3 z-20 rounded-lg border border-slate-700/70 bg-slate-950/70 px-3 py-1.5 text-xs text-slate-300 hover:text-white hover:border-blue-500/70 hover:bg-slate-900 transition"
+        >
+          Import / AI
+        </button>
+      )}
+
       <div className="absolute top-2 right-2 z-20 rounded bg-slate-950/70 border border-slate-700/60 px-2 py-1 text-[10px] text-slate-400 font-mono pointer-events-none">
         {diagnosticText}
       </div>
@@ -174,15 +204,16 @@ export function ScoreCanvas() {
         <ImportCenter
           onOpenFile={openImportFile}
           onOpenPrompt={() => setPromptOpen(true)}
-          onLoadDemo={loadDemoScore}
+          onLoadDemo={handleLoadDemo}
           onShowOmrInfo={setInfoMessage}
+          onClose={scoreLoaded ? closeImportUi : undefined}
         />
       )}
 
       {promptOpen && (
         <PromptSongDialog
           onClose={() => setPromptOpen(false)}
-          onGenerate={loadTexScore}
+          onGenerate={handleGenerateTex}
         />
       )}
 
