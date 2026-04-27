@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { RefObject } from 'react';
 import type * as alphaTab from '@coderline/alphatab';
 import { engine, type EngineDiagnostics } from '../core/AlphaTabEngine';
 import { useProjectStore } from '../stores/projectStore';
@@ -49,8 +50,8 @@ function hasRenderableSize(el: HTMLElement): boolean {
 }
 
 export function useAlphaTab(
-  containerRef: React.RefObject<HTMLElement | null>,
-  viewportRef: React.RefObject<HTMLElement | null>,
+  containerRef: RefObject<HTMLElement | null>,
+  viewportRef: RefObject<HTMLElement | null>,
   readyToInit: boolean,
 ): UseAlphaTabResult {
   const initialized = useRef(false);
