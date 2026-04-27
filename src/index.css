@@ -16,6 +16,9 @@
 body {
   background: #0f172a;
   color: #e2e8f0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
 }
 
 /* ── alphaTab 렌더링 컨테이너 배경 ── */
@@ -27,29 +30,40 @@ body {
   background: #1e293b !important;
 }
 
-/* ── 플레이어 커서: 현재 마디 배경 ── */
+/* ═══════════════════════════════════════════════
+   플레이어 커서 & 하이라이트
+   ═══════════════════════════════════════════════ */
+
+/* ── 현재 마디 배경 (연한 붉은 톤) ── */
 .at-cursor-bar {
-  background: rgba(250, 204, 21, 0.12) !important;
+  background: rgba(239, 68, 68, 0.08) !important;
 }
 
-/* ── 플레이어 커서: 비트 세로선 ── */
+/* ── 비트 위치 세로선: 붉은 점선 ── */
 .at-cursor-beat {
-  background: rgba(59, 130, 246, 0.75) !important;
-  width: 3px !important;
+  background: none !important;
+  width: 2px !important;
+  border-left: 2px dashed #ef4444 !important;
+  opacity: 0.9;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
 }
 
 /* ── 사용자 선택 영역 ── */
 .at-selection div {
-  background: rgba(59, 130, 246, 0.15) !important;
+  background: rgba(59, 130, 246, 0.2) !important;
 }
 
-/* ── 재생 중 하이라이트 (현재 연주 노트) ── */
+/* ── 재생 중 하이라이트 (현재 연주 노트 — 주황) ── */
 .at-highlight * {
-  fill: #3b82f6 !important;
-  stroke: #3b82f6 !important;
+  fill: #f97316 !important;
+  stroke: #f97316 !important;
 }
 
-/* ── 스크롤바 (얇은 다크 테마) ── */
+/* ═══════════════════════════════════════════════
+   스크롤바 — 다크 테마
+   ═══════════════════════════════════════════════ */
+
+/* alphaTab 내부 스크롤 */
 .at-main::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -65,7 +79,7 @@ body {
   background: #64748b;
 }
 
-/* ── 전역 스크롤바 ── */
+/* 전역 스크롤바 */
 *::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -76,4 +90,59 @@ body {
 *::-webkit-scrollbar-thumb {
   background: #334155;
   border-radius: 3px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+/* ═══════════════════════════════════════════════
+   range input (슬라이더) 스타일
+   ═══════════════════════════════════════════════ */
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 3px;
+  outline: none;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #3b82f6;
+  cursor: pointer;
+  border: 2px solid #1e293b;
+  box-shadow: 0 0 4px rgba(59, 130, 246, 0.4);
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  background: #60a5fa;
+  transform: scale(1.15);
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #3b82f6;
+  cursor: pointer;
+  border: 2px solid #1e293b;
+}
+
+/* ═══════════════════════════════════════════════
+   number input 스피너 숨기기
+   ═══════════════════════════════════════════════ */
+
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
 }
