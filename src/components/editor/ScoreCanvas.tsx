@@ -3,55 +3,94 @@
 // alphaTab을 마운트하고 렌더링하는 핵심 컴포넌트
 // ─────────────────────────────────────────────────
 
-import React, { useRef, useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAlphaTab } from '../../hooks/useAlphaTab';
 import { useTransportStore } from '../../stores/transportStore';
 import { Music } from 'lucide-react';
 
+function formatReadyText(value: boolean): string {
+  return value ? 'ready' : 'waiting';
+}
+
 export function ScoreCanvas() {
   const viewportRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [isVisible, setIsVisible] = useState(false);
+  const [readyToInit, setReadyToInit] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
 
-  // 컨테이너가 실제로 화면에 보이는지 감지
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
+    const container = containerRef.current;
+    const viewport = viewportRef.current;
+    if (container === null || viewport === null) return;
 
-    // ResizeObserver로 크기가 잡히는 순간 감지
-    const ro = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        if (entry.contentRect.width > 0 && entry.contentRect.height > 0) {
-          setIsVisible(true);
-          ro.disconnect();
-        }
-      }
-    });
-    ro.observe(el);
+    const checkSize = () => {
+      const containerRect = container.getBoundingClientRect();
+      const viewportRect = viewport.getBoundingClientRect();
+      const canInit =
+        containerRect.width > 0 &&
+        containerRect.height > 0 &&
+        viewportRect.width > 0 &&
+        viewportRect.height > 0;
+      setReadyToInit(canInit);
+    };
 
-    return () => ro.disconnect();
+    checkSize();
+
+    const observer = new ResizeObserver(checkSize);
+    observer.observe(container);
+    observer.observe(viewport);
+
+    const timer = window.setTimeout(checkSize, 80);
+
+    return () => {
+      window.clearTimeout(timer);
+      observer.disconnect();
+    };
   }, []);
 
-  // isVisible이 true가 된 후에만 alphaTab 초기화
-  const { importFile } = useAlphaTab(
-    isVisible ? containerRef : { current: null },
-    isVisible ? viewportRef : { current: null }
+  const { importFile, diagnostics, initialized, lastError } = useAlphaTab(
+    containerRef,
+    viewportRef,
+    readyToInit,
   );
 
   const isReady = useTransportStore((s) => s.isPlayerReady);
   const sfPct = useTransportStore((s) => s.sfProgress);
 
+  const showSoundFontOverlay = readyToInit && initialized && !isReady;
+  const showEmptyHint = readyToInit && initialized && diagnostics.scoreLoadedCount === 0;
+  const visibleError = lastError ?? diagnostics.lastError;
+
+  const diagnosticText = useMemo(() => {
+    return [
+      `init:${formatReadyText(initialized)}`,
+      `player:${formatReadyText(isReady)}`,
+      `score:${diagnostics.scoreLoadedCount}`,
+      `render:${diagnostics.renderFinishedCount}`,
+      `tracks:${diagnostics.trackCount}`,
+      `size:${diagnostics.lastContainerWidth}x${diagnostics.lastContainerHeight}`,
+    ].join('  |  ');
+  }, [diagnostics, initialized, isReady]);
+
   const onDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    if (!isDragging) setIsDragging(true);
+  }, [isDragging]);
+
+  const onDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
   }, []);
 
   const onDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      const f = e.dataTransfer?.files?.[0];
-      if (f) importFile(f);
+      setIsDragging(false);
+      const file = e.dataTransfer?.files?.[0];
+      if (file) importFile(file);
     },
     [importFile]
   );
@@ -60,10 +99,35 @@ export function ScoreCanvas() {
     <div
       className="relative flex-1 flex flex-col overflow-hidden bg-[#1e293b]"
       onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
-      {/* SoundFont 로딩 오버레이 */}
-      {isVisible && !isReady && (
+      <div className="absolute top-2 right-2 z-20 rounded bg-slate-950/70 border border-slate-700/60 px-2 py-1 text-[10px] text-slate-400 font-mono pointer-events-none">
+        {diagnosticText}
+      </div>
+
+      {visibleError && (
+        <div className="absolute left-3 right-3 top-10 z-40 rounded border border-red-500/40 bg-red-950/70 px-3 py-2 text-xs text-red-100 shadow-lg">
+          {visibleError}
+        </div>
+      )}
+
+      {isDragging && (
+        <div className="absolute inset-0 z-40 flex flex-col items-center justify-center border-2 border-dashed border-blue-400 bg-blue-950/40 text-blue-100 pointer-events-none">
+          <Music className="w-8 h-8 mb-2" />
+          <div className="text-sm font-semibold">Drop Guitar Pro / MusicXML file</div>
+          <div className="text-xs text-blue-200/80 mt-1">alphaTab will load and render it immediately.</div>
+        </div>
+      )}
+
+      {!readyToInit && (
+        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-[#0f172a]/80 text-slate-400">
+          <Music className="w-7 h-7 mb-2 text-slate-500" />
+          <p className="text-sm">Preparing score viewport…</p>
+        </div>
+      )}
+
+      {showSoundFontOverlay && (
         <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-[#0f172a]/80 backdrop-blur-sm">
           <p className="text-slate-400 text-sm mb-2">Loading SoundFont…</p>
           <div className="w-48 h-1.5 bg-slate-700 rounded-full overflow-hidden">
@@ -76,16 +140,24 @@ export function ScoreCanvas() {
         </div>
       )}
 
-      {/* 스크롤 뷰포트 */}
+      {showEmptyHint && !showSoundFontOverlay && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
+          <div className="rounded-xl border border-slate-700/70 bg-slate-950/50 px-5 py-4 text-center shadow-xl">
+            <Music className="w-8 h-8 mx-auto mb-2 text-slate-500" />
+            <div className="text-sm text-slate-300 font-semibold">Score engine is ready</div>
+            <div className="text-xs text-slate-500 mt-1">Drop a Guitar Pro or MusicXML file to load a song.</div>
+          </div>
+        </div>
+      )}
+
       <div
         ref={viewportRef}
         className="flex-1 overflow-auto relative"
       >
-        {/* alphaTab이 여기에 렌더링 */}
         <div
           ref={containerRef}
-          className="at-main"
-          style={{ width: '100%', minHeight: '100%' }}
+          className="at-main min-h-full"
+          style={{ width: '100%', minHeight: 640, padding: '24px 32px 80px 32px' }}
         />
       </div>
     </div>
