@@ -1,12 +1,12 @@
 import React from 'react';
-import { useEditorStore } from '@/stores/editorStore';
-import { useProjectStore } from '@/stores/projectStore';
-import { useUIStore } from '@/stores/uiStore';
-import { engine } from '@/core/AlphaTabEngine';
-import { IconButton } from '@/components/shared/IconButton';
-import { Slider } from '@/components/shared/Slider';
-import { MousePointer, Pencil, Eraser, Move, Scissors, Plus, Trash2, Copy, Volume2, VolumeX, Headphones, ChevronDown, ChevronRight } from 'lucide-react';
-import type { NoteDuration, InsertTool } from '@/types/project';
+import { useEditorStore } from '../../stores/editorStore';
+import { useProjectStore } from '../../stores/projectStore';
+import { useUIStore } from '../../stores/uiStore';
+import { engine } from '../../core/AlphaTabEngine';
+import { IconButton } from '../shared/IconButton';
+import { Slider } from '../shared/Slider';
+import { MousePointer, Pencil, Eraser, Move, Plus } from 'lucide-react';
+import type { NoteDuration, InsertTool } from '../../types/project';
 
 const DURATIONS: { key: NoteDuration; label: string; symbol: string }[] = [
   { key: 'whole', label: 'Whole', symbol: '𝄝' },

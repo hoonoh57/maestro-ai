@@ -1,29 +1,21 @@
-// ─────────────────────────────────────────────────
-// src/stores/transportStore.ts
-// Playback state synced with AlphaTabEngine
-// ─────────────────────────────────────────────────
-
 import { create } from 'zustand';
 import type { PlayerState, PositionInfo } from '../core/AlphaTabEngine';
 
 interface TransportState {
   playerState: PlayerState;
   isPlayerReady: boolean;
-  soundFontProgress: number; // 0-100
+  sfProgress: number; // 0-100
   position: PositionInfo;
-  masterVolume: number;  // 0-100 (UI display)
+  masterVolume: number;
   isLooping: boolean;
   metronomeOn: boolean;
   countInOn: boolean;
-  playbackSpeed: number; // 0.25 - 2.0
+  playbackSpeed: number;
 
-  // Actions (called by engine callbacks)
   setPlayerState: (s: PlayerState) => void;
-  setPlayerReady: (ready: boolean) => void;
-  setSoundFontProgress: (p: number) => void;
+  setPlayerReady: () => void;
+  setSfProgress: (p: number) => void;
   setPosition: (p: PositionInfo) => void;
-
-  // Actions (called by UI)
   setMasterVolume: (v: number) => void;
   setLooping: (v: boolean) => void;
   toggleMetronome: () => void;
@@ -34,7 +26,7 @@ interface TransportState {
 export const useTransportStore = create<TransportState>()((set) => ({
   playerState: 'stopped',
   isPlayerReady: false,
-  soundFontProgress: 0,
+  sfProgress: 0,
   position: { currentTick: 0, endTick: 0, currentTime: 0, endTime: 0 },
   masterVolume: 80,
   isLooping: false,
@@ -43,10 +35,9 @@ export const useTransportStore = create<TransportState>()((set) => ({
   playbackSpeed: 1.0,
 
   setPlayerState: (s) => set({ playerState: s }),
-  setPlayerReady: (ready) => set({ isPlayerReady: ready }),
-  setSoundFontProgress: (p) => set({ soundFontProgress: p }),
+  setPlayerReady: () => set({ isPlayerReady: true }),
+  setSfProgress: (p) => set({ sfProgress: p }),
   setPosition: (p) => set({ position: p }),
-
   setMasterVolume: (v) => set({ masterVolume: v }),
   setLooping: (v) => set({ isLooping: v }),
   toggleMetronome: () => set((s) => ({ metronomeOn: !s.metronomeOn })),

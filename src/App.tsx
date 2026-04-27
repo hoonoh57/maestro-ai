@@ -1,7 +1,3 @@
-// ─────────────────────────────────────────────────
-// src/App.tsx
-// ─────────────────────────────────────────────────
-
 import React from 'react';
 import { AppBar } from './components/shell/AppBar';
 import { TransportBar } from './components/shell/TransportBar';

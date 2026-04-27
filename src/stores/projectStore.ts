@@ -1,16 +1,18 @@
 import { create } from 'zustand';
 import type * as alphaTab from '@coderline/alphatab';
-import type { MaestroProject, MaestroTrack } from '@/types/project';
+import type { MaestroProject, MaestroTrack } from '../types/project';
 
-const DEFAULT_COLORS = ['#3b82f6', '#22c55e', '#ef4444', '#facc15', '#a855f7', '#ec4899'];
+const DEFAULT_COLORS = ['#3b82f6', '#22c55e', '#ef4444', '#facc15', '#a855f7', '#ec4899', '#14b8a6', '#6366f1', '#f97316', '#78716c'];
 
 function createDefaultProject(): MaestroProject {
   return {
     id: crypto.randomUUID(),
     name: 'Untitled Project',
+    artist: '',
     bpm: 120,
     key: 'C',
-    timeSignature: { numerator: 4, denominator: 4 },
+    timeSignature: '4/4',
+    difficulty: 'intermediate',
     tracks: [],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -21,13 +23,17 @@ interface ProjectState {
   project: MaestroProject;
   isDirty: boolean;
 
+  // Unified updater
+  updateProject: (patch: Partial<MaestroProject>) => void;
   setProject: (p: MaestroProject) => void;
   setProjectName: (name: string) => void;
   setBpm: (bpm: number) => void;
   setKey: (key: string) => void;
 
-  // Track operations
-  syncTracksFromScore: (score: alphaTab.model.Score) => void;
+  // Track sync from alphaTab
+  syncFromScore: (score: alphaTab.model.Score) => void;
+
+  // Track ops
   addTrack: (name: string, instrument: string) => void;
   removeTrack: (id: string) => void;
   duplicateTrack: (id: string) => void;
@@ -46,8 +52,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   project: createDefaultProject(),
   isDirty: false,
 
+  updateProject: (patch) => set((s) => ({
+    project: { ...s.project, ...patch, updatedAt: new Date().toISOString() },
+    isDirty: true,
+  })),
+
   setProject: (p) => set({ project: p, isDirty: false }),
-  
+
   setProjectName: (name) => set((s) => ({
     project: { ...s.project, name, updatedAt: new Date().toISOString() },
     isDirty: true,
@@ -63,16 +74,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     isDirty: true,
   })),
 
-  syncTracksFromScore: (score) => set((s) => {
-    const TRACK_COLORS = [
-      '#3b82f6', '#22c55e', '#ef4444', '#f97316', '#facc15',
-      '#a855f7', '#ec4899', '#14b8a6', '#6366f1', '#78716c',
-    ];
-    const tracks: MaestroTrack[] = score.tracks.map((t, i) => ({
+  syncFromScore: (score) => set((s) => {
+    const tracks: MaestroTrack[] = score.tracks.map((t: any, i: number) => ({
       id: `track-${i}`,
       name: t.name || `Track ${i + 1}`,
       instrument: t.playbackInfo?.program?.toString() ?? 'acoustic_guitar',
-      color: TRACK_COLORS[i % TRACK_COLORS.length],
+      color: DEFAULT_COLORS[i % DEFAULT_COLORS.length],
       volume: Math.round(((t.playbackInfo?.volume ?? 15) / 16) * 100),
       pan: ((t.playbackInfo?.balance ?? 64) - 64) * 100 / 64,
       mute: false,
@@ -84,6 +91,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       project: {
         ...s.project,
         name: score.title || s.project.name,
+        artist: score.artist || s.project.artist || '',
         bpm: score.tempo || s.project.bpm,
         tracks,
         updatedAt: new Date().toISOString(),
@@ -105,67 +113,40 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       collapsed: false,
     };
     return {
-      project: {
-        ...s.project,
-        tracks: [...s.project.tracks, newTrack],
-        updatedAt: new Date().toISOString(),
-      },
+      project: { ...s.project, tracks: [...s.project.tracks, newTrack], updatedAt: new Date().toISOString() },
       isDirty: true,
     };
   }),
 
   removeTrack: (id) => set((s) => ({
-    project: {
-      ...s.project,
-      tracks: s.project.tracks.filter(t => t.id !== id),
-      updatedAt: new Date().toISOString(),
-    },
+    project: { ...s.project, tracks: s.project.tracks.filter(t => t.id !== id), updatedAt: new Date().toISOString() },
     isDirty: true,
   })),
 
   duplicateTrack: (id) => set((s) => {
     const original = s.project.tracks.find(t => t.id === id);
     if (!original) return {};
-    const dup: MaestroTrack = {
-      ...original,
-      id: crypto.randomUUID(),
-      name: `${original.name} (Copy)`,
-    };
+    const dup: MaestroTrack = { ...original, id: crypto.randomUUID(), name: `${original.name} (Copy)` };
     const idx = s.project.tracks.findIndex(t => t.id === id);
     const tracks = [...s.project.tracks];
     tracks.splice(idx + 1, 0, dup);
-    return {
-      project: { ...s.project, tracks, updatedAt: new Date().toISOString() },
-      isDirty: true,
-    };
+    return { project: { ...s.project, tracks, updatedAt: new Date().toISOString() }, isDirty: true };
   }),
 
   setTrackMute: (id, mute) => set((s) => ({
-    project: {
-      ...s.project,
-      tracks: s.project.tracks.map(t => t.id === id ? { ...t, mute } : t),
-    },
+    project: { ...s.project, tracks: s.project.tracks.map(t => t.id === id ? { ...t, mute } : t) },
   })),
 
   setTrackSolo: (id, solo) => set((s) => ({
-    project: {
-      ...s.project,
-      tracks: s.project.tracks.map(t => t.id === id ? { ...t, solo } : t),
-    },
+    project: { ...s.project, tracks: s.project.tracks.map(t => t.id === id ? { ...t, solo } : t) },
   })),
 
   setTrackVolume: (id, volume) => set((s) => ({
-    project: {
-      ...s.project,
-      tracks: s.project.tracks.map(t => t.id === id ? { ...t, volume } : t),
-    },
+    project: { ...s.project, tracks: s.project.tracks.map(t => t.id === id ? { ...t, volume } : t) },
   })),
 
   setTrackCollapsed: (id, collapsed) => set((s) => ({
-    project: {
-      ...s.project,
-      tracks: s.project.tracks.map(t => t.id === id ? { ...t, collapsed } : t),
-    },
+    project: { ...s.project, tracks: s.project.tracks.map(t => t.id === id ? { ...t, collapsed } : t) },
   })),
 
   saveToLocal: () => {
@@ -181,12 +162,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const raw = localStorage.getItem(`maestro_project_${lastId}`);
     if (!raw) return false;
     try {
-      const project = JSON.parse(raw) as MaestroProject;
-      set({ project, isDirty: false });
+      set({ project: JSON.parse(raw), isDirty: false });
       return true;
-    } catch {
-      return false;
-    }
+    } catch { return false; }
   },
 
   markClean: () => set({ isDirty: false }),

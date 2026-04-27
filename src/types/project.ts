@@ -1,9 +1,11 @@
 export interface MaestroProject {
   id: string;
   name: string;
+  artist?: string;
   bpm: number;
   key: string;
-  timeSignature: { numerator: number; denominator: number };
+  timeSignature: string; // "4/4" 형태로 통일
+  difficulty?: string;
   tracks: MaestroTrack[];
   createdAt: string;
   updatedAt: string;
@@ -14,12 +16,12 @@ export interface MaestroTrack {
   name: string;
   instrument: string;
   color: string;
-  volume: number;    // 0–100
-  pan: number;       // -100 to +100
+  volume: number;
+  pan: number;
   mute: boolean;
   solo: boolean;
   collapsed: boolean;
-  atTrackIndex?: number;  // alphaTab score track index
+  atTrackIndex?: number;
 }
 
 export type NoteDuration = 'whole' | 'half' | 'quarter' | 'eighth' | 'sixteenth';
@@ -32,10 +34,29 @@ export interface NoteSelection {
   noteIndex: number;
 }
 
-export interface PositionInfo {
+export interface NoteData {
+  id: string;
+  trackIndex: number;
   measure: number;
   beat: number;
-  tick: number;
-  timeMs: number;
-  totalTimeMs: number;
+  string: number;
+  fret: number;
+  midiNumber: number;
+  duration: number;
+  dotted: boolean;
+  triplet: boolean;
+  dynamic: string;
+  velocity: number;
+  accidental: string;
+  hammerOn: boolean;
+  pullOff: boolean;
+  slide: boolean;
+  bend: boolean;
+  vibrato: boolean;
+  harmonic: boolean;
+  palmMute: boolean;
+  letRing: boolean;
+  ghost: boolean;
+  accent: boolean;
+  staccato: boolean;
 }

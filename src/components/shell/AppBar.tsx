@@ -1,11 +1,8 @@
 import React, { useCallback } from 'react';
-import {
-  Music4, Save, FolderOpen, Download, Upload,
-  Settings, HelpCircle,
-} from 'lucide-react';
-import { useUIStore, type AppMode } from '@/stores/uiStore';
-import { useProjectStore } from '@/stores/projectStore';
-import { useFileOperations } from '@/hooks/useFileOperations';
+import { Music4, Save, FolderOpen, Download, Upload } from 'lucide-react';
+import { useUIStore, type AppMode } from '../../stores/uiStore';
+import { useProjectStore } from '../../stores/projectStore';
+import { useFileOperations } from '../../hooks/useFileOperations';
 
 const MODES: { id: AppMode; label: string }[] = [
   { id: 'editor', label: 'Editor' },

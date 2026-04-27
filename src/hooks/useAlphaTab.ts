@@ -1,8 +1,3 @@
-// ─────────────────────────────────────────────────
-// src/hooks/useAlphaTab.ts
-// alphaTab 초기화 — 컨테이너가 visible일 때만 실행
-// ─────────────────────────────────────────────────
-
 import { useEffect, useRef, useCallback } from 'react';
 import { engine } from '../core/AlphaTabEngine';
 import { useProjectStore } from '../stores/projectStore';
@@ -39,9 +34,6 @@ const DEMO_TEX = `
   3.4 3.4 5.3 5.3
 `.trim();
 
-// 더미 ref (null 방어용)
-const nullRef = { current: null };
-
 export function useAlphaTab(
   containerRef: React.RefObject<HTMLElement | null>,
   viewportRef: React.RefObject<HTMLElement | null>
@@ -52,12 +44,9 @@ export function useAlphaTab(
     const el = containerRef.current;
     const scroll = viewportRef.current;
 
-    // 둘 중 하나라도 없으면 대기
     if (!el || !scroll) return;
-    // 이미 초기화했으면 스킵
     if (initialized.current) return;
 
-    // 크기 한번 더 확인
     const rect = el.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) {
       console.warn('[useAlphaTab] Container has zero size, skipping init');
@@ -93,7 +82,6 @@ export function useAlphaTab(
       onError: (e) => console.error('[alphaTab error]', e),
     });
 
-    // 약간의 딜레이 후 데모 로드 (렌더러 준비 대기)
     const timer = setTimeout(() => {
       engine.loadTex(DEMO_TEX);
     }, 300);
@@ -103,7 +91,7 @@ export function useAlphaTab(
       engine.destroy();
       initialized.current = false;
     };
-  }, [containerRef.current, viewportRef.current]); // ref.current 변경 시 재실행
+  }, [containerRef.current, viewportRef.current]);
 
   const importFile = useCallback((file: File) => {
     const reader = new FileReader();
