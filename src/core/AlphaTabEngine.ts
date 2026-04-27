@@ -9,6 +9,17 @@ export interface PositionInfo {
   endTime: number;
 }
 
+export interface EngineDiagnostics {
+  initialized: boolean;
+  playerReady: boolean;
+  scoreLoadedCount: number;
+  renderFinishedCount: number;
+  trackCount: number;
+  lastContainerWidth: number;
+  lastContainerHeight: number;
+  lastError: string | null;
+}
+
 export interface EngineCallbacks {
   onScoreLoaded?: (score: alphaTab.model.Score) => void;
   onPlayerStateChanged?: (state: PlayerState) => void;
@@ -21,27 +32,84 @@ export interface EngineCallbacks {
   onError?: (error: Error) => void;
 }
 
+function toError(value: unknown): Error {
+  if (value instanceof Error) return value;
+  if (typeof value === 'string') return new Error(value);
+  try {
+    return new Error(JSON.stringify(value));
+  } catch {
+    return new Error('Unknown alphaTab error');
+  }
+}
+
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  if (value < 0) return 0;
+  if (value > 1) return 1;
+  return value;
+}
+
 export class AlphaTabEngine {
   private api: alphaTab.AlphaTabApi | null = null;
   private callbacks: EngineCallbacks = {};
+  private container: HTMLElement | null = null;
+  private viewport: HTMLElement | null = null;
   private _isPlayerReady = false;
+  private scoreLoadedCount = 0;
+  private renderFinishedCount = 0;
+  private lastError: string | null = null;
+  private lastContainerWidth = 0;
+  private lastContainerHeight = 0;
 
-  get isPlayerReady() { return this._isPlayerReady; }
+  get isInitialized(): boolean { return this.api !== null; }
+  get isPlayerReady(): boolean { return this._isPlayerReady; }
   get score(): alphaTab.model.Score | null { return this.api?.score ?? null; }
   get tracks(): alphaTab.model.Track[] { return this.api?.tracks ?? []; }
   get alphaTabApi(): alphaTab.AlphaTabApi | null { return this.api; }
 
-  // ── Initialize ──
+  getDiagnostics(): EngineDiagnostics {
+    return {
+      initialized: this.api !== null,
+      playerReady: this._isPlayerReady,
+      scoreLoadedCount: this.scoreLoadedCount,
+      renderFinishedCount: this.renderFinishedCount,
+      trackCount: this.score?.tracks?.length ?? this.tracks.length ?? 0,
+      lastContainerWidth: this.lastContainerWidth,
+      lastContainerHeight: this.lastContainerHeight,
+      lastError: this.lastError,
+    };
+  }
+
   init(
     container: HTMLElement,
     viewport: HTMLElement | null,
     callbacks: EngineCallbacks,
-  ) {
-    if (this.api) {
-      console.warn('[AlphaTabEngine] Already initialized');
-      return;
-    }
+  ): boolean {
     this.callbacks = callbacks;
+
+    const rect = container.getBoundingClientRect();
+    this.lastContainerWidth = Math.round(rect.width);
+    this.lastContainerHeight = Math.round(rect.height);
+
+    if (rect.width <= 0 || rect.height <= 0) {
+      this.reportError(new Error('[AlphaTabEngine] Container has zero size. Init delayed.'));
+      return false;
+    }
+
+    if (this.api !== null) {
+      if (this.container === container) {
+        console.info('[AlphaTabEngine] Already initialized on same container.');
+        return true;
+      }
+      this.destroy();
+    }
+
+    this.container = container;
+    this.viewport = viewport;
+    this._isPlayerReady = false;
+    this.scoreLoadedCount = 0;
+    this.renderFinishedCount = 0;
+    this.lastError = null;
 
     const settings: any = {
       core: {
@@ -49,8 +117,8 @@ export class AlphaTabEngine {
         includeNoteBounds: true,
       },
       display: {
-        layoutMode: 1, // Page
-        staveProfile: 0, // Default
+        layoutMode: 1,
+        staveProfile: 0,
         resources: {
           mainGlyphColor: '#e2e8f0',
           secondaryGlyphColor: '#94a3b8',
@@ -68,31 +136,37 @@ export class AlphaTabEngine {
         enableElementHighlighting: true,
         soundFont: '/soundfont/sonivox.sf2',
         scrollElement: viewport ?? undefined,
-        scrollMode: 2, // Continuous
+        scrollMode: 2,
       },
       notation: {
-        notationMode: 0, // GuitarPro
+        notationMode: 0,
       },
     };
 
     try {
+      container.innerHTML = '';
       this.api = new alphaTab.AlphaTabApi(container, settings);
       this.bindEvents();
-      console.log('[AlphaTabEngine] Initialized');
-    } catch (e) {
-      console.error('[AlphaTabEngine] Init failed:', e);
-      this.callbacks.onError?.(e as Error);
+      console.info('[AlphaTabEngine] Initialized', this.getDiagnostics());
+      return true;
+    } catch (e: unknown) {
+      this.api = null;
+      this.reportError(toError(e));
+      return false;
     }
   }
 
-  private bindEvents() {
-    if (!this.api) return;
+  private bindEvents(): void {
+    if (this.api === null) return;
 
-    this.api.scoreLoaded.on((score: any) => {
+    this.api.scoreLoaded.on((score: alphaTab.model.Score) => {
+      this.scoreLoadedCount += 1;
       this.callbacks.onScoreLoaded?.(score);
     });
 
     this.api.renderFinished.on(() => {
+      this.renderFinishedCount += 1;
+      this.refreshContainerSize();
       this.callbacks.onRenderFinished?.();
     });
 
@@ -117,11 +191,11 @@ export class AlphaTabEngine {
       });
     });
 
-    this.api.beatMouseDown.on((beat: any) => {
+    this.api.beatMouseDown.on((beat: alphaTab.model.Beat) => {
       this.callbacks.onBeatMouseDown?.(beat);
     });
 
-    this.api.noteMouseDown.on((note: any) => {
+    this.api.noteMouseDown.on((note: alphaTab.model.Note) => {
       this.callbacks.onNoteMouseDown?.(note);
     });
 
@@ -130,58 +204,108 @@ export class AlphaTabEngine {
       this.callbacks.onSoundFontProgress?.(pct);
     });
 
-    this.api.error.on((e: any) => {
-      console.error('[alphaTab error]', e);
-      this.callbacks.onError?.(e as Error);
+    this.api.error.on((e: unknown) => {
+      this.reportError(toError(e));
     });
   }
 
-  // ── Score Loading ──
-  loadFile(data: ArrayBuffer) { this.api?.load(data); }
-
-  loadTex(tex: string) {
-    try { this.api?.tex(tex, 'all'); } catch (e) { console.error('[loadTex]', e); }
+  private refreshContainerSize(): void {
+    if (this.container === null) return;
+    const rect = this.container.getBoundingClientRect();
+    this.lastContainerWidth = Math.round(rect.width);
+    this.lastContainerHeight = Math.round(rect.height);
   }
 
-  renderTracks(tracks: alphaTab.model.Track[]) { this.api?.renderTracks(tracks); }
-  renderScore(score: alphaTab.model.Score) { this.api?.renderScore(score); }
-  render() { this.api?.render(); }
+  private reportError(error: Error): void {
+    this.lastError = error.message;
+    console.error('[AlphaTabEngine]', error);
+    this.callbacks.onError?.(error);
+  }
 
-  renderAllTracks() {
+  loadFile(data: ArrayBuffer): boolean {
+    if (this.api === null) {
+      this.reportError(new Error('[AlphaTabEngine] Cannot load file before init.'));
+      return false;
+    }
+    try {
+      this.api.load(data);
+      return true;
+    } catch (e: unknown) {
+      this.reportError(toError(e));
+      return false;
+    }
+  }
+
+  loadTex(tex: string): boolean {
+    if (this.api === null) {
+      this.reportError(new Error('[AlphaTabEngine] Cannot load tex before init.'));
+      return false;
+    }
+    try {
+      this.api.tex(tex, 'all');
+      return true;
+    } catch (e: unknown) {
+      this.reportError(toError(e));
+      return false;
+    }
+  }
+
+  renderTracks(tracks: alphaTab.model.Track[]): void { this.api?.renderTracks(tracks); }
+  renderScore(score: alphaTab.model.Score): void { this.api?.renderScore(score); }
+  render(): void { this.api?.render(); }
+
+  renderAllTracks(): void {
     const s = this.score;
-    if (s && s.tracks.length > 0) this.api?.renderTracks(s.tracks);
+    if (s !== null && s.tracks.length > 0) this.api?.renderTracks(s.tracks);
   }
 
-  // ── Playback ──
-  play() { this.api?.play(); }
-  pause() { this.api?.pause(); }
-  playPause() { this.api?.playPause(); }
-  stop() { this.api?.stop(); }
+  forceLayoutRefresh(): void {
+    if (this.api === null) return;
+    this.refreshContainerSize();
+    const apiAny = this.api as any;
+    if (typeof apiAny.resize === 'function') apiAny.resize();
+    this.api.render();
+  }
 
-  setPlaybackSpeed(speed: number) { if (this.api) this.api.playbackSpeed = speed; }
-  setMasterVolume(vol: number) { if (this.api) this.api.masterVolume = Math.max(0, Math.min(1, vol)); }
-  setMetronomeVolume(vol: number) { if (this.api) this.api.metronomeVolume = Math.max(0, Math.min(1, vol)); }
-  setCountInVolume(vol: number) { if (this.api) this.api.countInVolume = Math.max(0, Math.min(1, vol)); }
-  setLooping(enabled: boolean) { if (this.api) this.api.isLooping = enabled; }
+  play(): void { this.api?.play(); }
+  pause(): void { this.api?.pause(); }
+  playPause(): void { this.api?.playPause(); }
+  stop(): void { this.api?.stop(); }
 
-  // ── Track Controls ──
-  changeTrackMute(tracks: alphaTab.model.Track[], mute: boolean) { this.api?.changeTrackMute(tracks, mute); }
-  changeTrackSolo(tracks: alphaTab.model.Track[], solo: boolean) { this.api?.changeTrackSolo(tracks, solo); }
-  changeTrackVolume(tracks: alphaTab.model.Track[], volume: number) { this.api?.changeTrackVolume(tracks, volume); }
+  setPlaybackSpeed(speed: number): void {
+    if (this.api !== null && Number.isFinite(speed) && speed > 0) this.api.playbackSpeed = speed;
+  }
 
-  scrollToCursor() { this.api?.scrollToCursor(); }
+  setMasterVolume(vol: number): void { if (this.api !== null) this.api.masterVolume = clamp01(vol); }
+  setMetronomeVolume(vol: number): void { if (this.api !== null) this.api.metronomeVolume = clamp01(vol); }
+  setCountInVolume(vol: number): void { if (this.api !== null) this.api.countInVolume = clamp01(vol); }
+  setLooping(enabled: boolean): void { if (this.api !== null) this.api.isLooping = enabled; }
+
+  changeTrackMute(tracks: alphaTab.model.Track[], mute: boolean): void { this.api?.changeTrackMute(tracks, mute); }
+  changeTrackSolo(tracks: alphaTab.model.Track[], solo: boolean): void { this.api?.changeTrackSolo(tracks, solo); }
+  changeTrackVolume(tracks: alphaTab.model.Track[], volume: number): void { this.api?.changeTrackVolume(tracks, clamp01(volume)); }
+
+  scrollToCursor(): void { this.api?.scrollToCursor(); }
 
   get tickPosition(): number { return this.api?.tickPosition ?? 0; }
-  set tickPosition(tick: number) { if (this.api) this.api.tickPosition = tick; }
+  set tickPosition(tick: number) { if (this.api !== null && Number.isFinite(tick)) this.api.tickPosition = tick; }
 
-  downloadMidi() { this.api?.downloadMidi(); }
+  downloadMidi(): void { this.api?.downloadMidi(); }
 
-  playNote(note: alphaTab.model.Note) { try { this.api?.playNote(note); } catch {} }
-  playBeat(beat: alphaTab.model.Beat) { try { this.api?.playBeat(beat); } catch {} }
+  playNote(note: alphaTab.model.Note): void {
+    try { this.api?.playNote(note); } catch (e: unknown) { this.reportError(toError(e)); }
+  }
 
-  destroy() {
-    try { this.api?.destroy(); } catch {}
+  playBeat(beat: alphaTab.model.Beat): void {
+    try { this.api?.playBeat(beat); } catch (e: unknown) { this.reportError(toError(e)); }
+  }
+
+  destroy(): void {
+    try { this.api?.destroy(); } catch (e: unknown) { console.warn('[AlphaTabEngine] destroy warning', e); }
+    if (this.container !== null) this.container.innerHTML = '';
     this.api = null;
+    this.container = null;
+    this.viewport = null;
     this._isPlayerReady = false;
   }
 }
