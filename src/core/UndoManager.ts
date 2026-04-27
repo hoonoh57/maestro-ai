@@ -37,8 +37,14 @@ class UndoManager {
 
   get canUndo() { return this.undoStack.length > 0; }
   get canRedo() { return this.redoStack.length > 0; }
-  get undoDescription() { return this.undoStack.at(-1)?.description ?? ''; }
-  get redoDescription() { return this.redoStack.at(-1)?.description ?? ''; }
+  get undoDescription() {
+    if (this.undoStack.length === 0) return '';
+    return this.undoStack[this.undoStack.length - 1].description;
+  }
+  get redoDescription() {
+    if (this.redoStack.length === 0) return '';
+    return this.redoStack[this.redoStack.length - 1].description;
+  }
 
   subscribe(listener: () => void) {
     this.listeners.add(listener);
