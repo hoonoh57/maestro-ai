@@ -6,6 +6,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAlphaTab } from '../../hooks/useAlphaTab';
 import { useTransportStore } from '../../stores/transportStore';
+import { inspectImportFile } from '../../services/import/FileImportService';
+import { ImportCenter } from '../import/ImportCenter';
+import { PromptSongDialog } from '../import/PromptSongDialog';
 import { Music } from 'lucide-react';
 
 function formatReadyText(value: boolean): string {
@@ -17,6 +20,8 @@ export function ScoreCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [readyToInit, setReadyToInit] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [promptOpen, setPromptOpen] = useState(false);
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -48,7 +53,14 @@ export function ScoreCanvas() {
     };
   }, []);
 
-  const { importFile, diagnostics, initialized, lastError } = useAlphaTab(
+  const {
+    importFile,
+    loadTexScore,
+    loadDemoScore,
+    diagnostics,
+    initialized,
+    lastError,
+  } = useAlphaTab(
     containerRef,
     viewportRef,
     readyToInit,
@@ -58,7 +70,8 @@ export function ScoreCanvas() {
   const sfPct = useTransportStore((s) => s.sfProgress);
 
   const showSoundFontOverlay = readyToInit && initialized && !isReady;
-  const showEmptyHint = readyToInit && initialized && diagnostics.scoreLoadedCount === 0;
+  const scoreLoaded = diagnostics.scoreLoadedCount > 0;
+  const showImportCenter = readyToInit && initialized && !scoreLoaded && !showSoundFontOverlay;
   const visibleError = lastError ?? diagnostics.lastError;
 
   const diagnosticText = useMemo(() => {
@@ -71,6 +84,16 @@ export function ScoreCanvas() {
       `size:${diagnostics.lastContainerWidth}x${diagnostics.lastContainerHeight}`,
     ].join('  |  ');
   }, [diagnostics, initialized, isReady]);
+
+  const openImportFile = useCallback((file: File) => {
+    const info = inspectImportFile(file);
+    if (!info.canLoadDirectly) {
+      setInfoMessage(info.message);
+      return;
+    }
+    setInfoMessage(null);
+    importFile(file);
+  }, [importFile]);
 
   const onDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -90,9 +113,9 @@ export function ScoreCanvas() {
       e.stopPropagation();
       setIsDragging(false);
       const file = e.dataTransfer?.files?.[0];
-      if (file) importFile(file);
+      if (file) openImportFile(file);
     },
-    [importFile]
+    [openImportFile]
   );
 
   return (
@@ -112,11 +135,18 @@ export function ScoreCanvas() {
         </div>
       )}
 
+      {infoMessage && (
+        <div className="absolute left-3 right-3 top-10 z-40 rounded border border-blue-500/40 bg-blue-950/80 px-3 py-2 text-xs text-blue-100 shadow-lg flex items-center justify-between gap-3">
+          <span>{infoMessage}</span>
+          <button onClick={() => setInfoMessage(null)} className="text-blue-200 hover:text-white">닫기</button>
+        </div>
+      )}
+
       {isDragging && (
         <div className="absolute inset-0 z-40 flex flex-col items-center justify-center border-2 border-dashed border-blue-400 bg-blue-950/40 text-blue-100 pointer-events-none">
           <Music className="w-8 h-8 mb-2" />
-          <div className="text-sm font-semibold">Drop Guitar Pro / MusicXML file</div>
-          <div className="text-xs text-blue-200/80 mt-1">alphaTab will load and render it immediately.</div>
+          <div className="text-sm font-semibold">Drop Guitar Pro / MusicXML / alphaTex file</div>
+          <div className="text-xs text-blue-200/80 mt-1">PDF and image scores will be routed to OMR preparation.</div>
         </div>
       )}
 
@@ -140,14 +170,20 @@ export function ScoreCanvas() {
         </div>
       )}
 
-      {showEmptyHint && !showSoundFontOverlay && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
-          <div className="rounded-xl border border-slate-700/70 bg-slate-950/50 px-5 py-4 text-center shadow-xl">
-            <Music className="w-8 h-8 mx-auto mb-2 text-slate-500" />
-            <div className="text-sm text-slate-300 font-semibold">Score engine is ready</div>
-            <div className="text-xs text-slate-500 mt-1">Drop a Guitar Pro or MusicXML file to load a song.</div>
-          </div>
-        </div>
+      {showImportCenter && (
+        <ImportCenter
+          onOpenFile={openImportFile}
+          onOpenPrompt={() => setPromptOpen(true)}
+          onLoadDemo={loadDemoScore}
+          onShowOmrInfo={setInfoMessage}
+        />
+      )}
+
+      {promptOpen && (
+        <PromptSongDialog
+          onClose={() => setPromptOpen(false)}
+          onGenerate={loadTexScore}
+        />
       )}
 
       <div
