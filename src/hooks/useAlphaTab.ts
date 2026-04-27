@@ -5,7 +5,7 @@ import { engine, type EngineDiagnostics } from '../core/AlphaTabEngine';
 import { useProjectStore } from '../stores/projectStore';
 import { useTransportStore } from '../stores/transportStore';
 import { useEditorStore } from '../stores/editorStore';
-import { inspectImportFile, readBinaryFile, readTextFile } from '../services/import/FileImportService';
+import { createLoadedScoreFile, inspectImportFile, readBinaryFile, readTextFile } from '../services/import/FileImportService';
 
 export const DEMO_TEX = `
 \\title "MaestroAI Demo"
@@ -40,11 +40,12 @@ export const DEMO_TEX = `
 interface UseAlphaTabResult {
   engine: typeof engine;
   importFile: (file: File) => void;
-  loadTexScore: (tex: string) => void;
+  loadTexScore: (tex: string, projectName?: string) => void;
   loadDemoScore: () => void;
   diagnostics: EngineDiagnostics;
   initialized: boolean;
   lastError: string | null;
+  lastImportMessage: string | null;
 }
 
 function hasRenderableSize(el: HTMLElement): boolean {
@@ -62,6 +63,7 @@ export function useAlphaTab(
   const retryTimer = useRef<number | null>(null);
   const [diagnostics, setDiagnostics] = useState<EngineDiagnostics>(() => engine.getDiagnostics());
   const [lastError, setLastError] = useState<string | null>(null);
+  const [lastImportMessage, setLastImportMessage] = useState<string | null>(null);
 
   const refreshDiagnostics = useCallback(() => {
     setDiagnostics(engine.getDiagnostics());
@@ -74,15 +76,19 @@ export function useAlphaTab(
     }
   }, []);
 
-  const loadTexScore = useCallback((tex: string) => {
+  const loadTexScore = useCallback((tex: string, projectName?: string) => {
     demoLoaded.current = true;
     setLastError(null);
+    setLastImportMessage(projectName ? `Loaded alphaTex: ${projectName}` : 'Loaded alphaTex score.');
+    if (projectName && projectName.trim().length > 0) {
+      useProjectStore.getState().setProjectName(projectName.trim());
+    }
     engine.loadTex(tex);
     refreshDiagnostics();
   }, [refreshDiagnostics]);
 
   const loadDemoScore = useCallback(() => {
-    loadTexScore(DEMO_TEX);
+    loadTexScore(DEMO_TEX, 'MaestroAI Demo');
   }, [loadTexScore]);
 
   const tryInitialize = useCallback(() => {
@@ -183,31 +189,44 @@ export function useAlphaTab(
   }, [clearRetryTimer]);
 
   const importFile = useCallback((file: File) => {
+    const loadedFile = createLoadedScoreFile(file);
     const info = inspectImportFile(file);
+
     if (!info.canLoadDirectly) {
       setLastError(info.message);
+      setLastImportMessage(null);
       return;
     }
 
     setLastError(null);
+    setLastImportMessage(`Loading ${loadedFile.info.displayName}: ${file.name}`);
     demoLoaded.current = true;
+    useProjectStore.getState().setProjectName(loadedFile.baseName);
 
-    if (info.kind === 'alphatex') {
+    if (loadedFile.info.kind === 'alphatex') {
       readTextFile(file)
         .then((text) => {
           engine.loadTex(text);
+          setLastImportMessage(`Loaded ${loadedFile.info.displayName}: ${file.name}`);
           refreshDiagnostics();
         })
-        .catch((error: Error) => setLastError(error.message));
+        .catch((error: Error) => {
+          setLastError(error.message);
+          setLastImportMessage(null);
+        });
       return;
     }
 
     readBinaryFile(file)
       .then((data) => {
         engine.loadFile(data);
+        setLastImportMessage(`Loaded ${loadedFile.info.displayName}: ${file.name}`);
         refreshDiagnostics();
       })
-      .catch((error: Error) => setLastError(error.message));
+      .catch((error: Error) => {
+        setLastError(error.message);
+        setLastImportMessage(null);
+      });
   }, [refreshDiagnostics]);
 
   return {
@@ -218,5 +237,6 @@ export function useAlphaTab(
     diagnostics,
     initialized: diagnostics.initialized,
     lastError,
+    lastImportMessage,
   };
 }
