@@ -63,9 +63,14 @@ function getRenderDurationSeconds(): number {
   return 16;
 }
 
-function getRoleForTrack(index: number): string {
+function getProjectTrack(index: number): any {
   const project = useProjectStore.getState().project;
-  const track = project.tracks(index);
+  const tracks = Array.isArray(project.tracks) ? project.tracks : [];
+  return tracks[index] || null;
+}
+
+function getRoleForTrack(index: number): string {
+  const track = getProjectTrack(index);
   if (track?.role) return track.role;
   const raw = `${track?.name || ''} ${track?.instrument || ''}`.toLowerCase();
   if (raw.includes('bass')) return 'bass';
@@ -112,7 +117,7 @@ function getBeatDurationSeconds(beat: any, bpm: number): number {
 }
 
 function noteToMidi(note: any, trackIndex: number): number {
-  const direct = [note?.midi, note?.midiNote, note?.realValue, note?.displayValue, note?.value, note?.octave ? undefined : undefined];
+  const direct = [note?.midi, note?.midiNote, note?.realValue, note?.displayValue, note?.value];
   for (const candidate of direct) {
     const value = Number(candidate);
     if (Number.isFinite(value) && value >= 12 && value <= 120) return Math.round(value);
@@ -152,7 +157,8 @@ function collectScoreSummary(durationSeconds: number): ScoreSummary {
 
   for (let trackIndex = 0; trackIndex < score.tracks.length; trackIndex += 1) {
     const track: any = score.tracks[trackIndex];
-    const trackName = String(track?.name || project.tracks(trackIndex)?.name || `Track ${trackIndex + 1}`);
+    const projectTrack = getProjectTrack(trackIndex);
+    const trackName = String(track?.name || projectTrack?.name || `Track ${trackIndex + 1}`);
     const role = getRoleForTrack(trackIndex);
     let fallbackBeatIndex = 0;
     let trackNoteCount = 0;
