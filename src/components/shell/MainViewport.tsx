@@ -3,12 +3,29 @@ import { useUIStore } from '../../stores/uiStore';
 import { ScoreCanvas } from '../editor/ScoreCanvas';
 import { TestConsole } from '../modes/TestConsole';
 import { TrackMixerPanel } from '../mixer/TrackMixerPanel';
+import { BackingInspector } from '../inspector/BackingInspector';
 
 function PlaceholderMode({ title, phase }: { title: string; phase: number }) {
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#1e293b] text-slate-500 z-10">
       <span className="text-xl font-semibold mb-1">{title}</span>
       <span className="text-[12px]">Phase {phase} — Coming Soon</span>
+    </div>
+  );
+}
+
+function BackingModePanel() {
+  return (
+    <div className="absolute inset-0 z-20 bg-[#0f172a]/95 text-slate-200 overflow-auto">
+      <div className="max-w-[520px] mx-auto py-8 px-4">
+        <div className="mb-5">
+          <h2 className="text-xl font-bold text-white">Performance Audio Playback</h2>
+          <p className="text-sm text-slate-500 mt-1">
+            Import a finished MP3/WAV/MR/stem track for stage-quality playback. Score playback remains available underneath for preview and notation work.
+          </p>
+        </div>
+        <BackingInspector />
+      </div>
     </div>
   );
 }
@@ -26,7 +43,7 @@ export function MainViewport() {
         </div>
       )}
       {mode === 'practice' && <PlaceholderMode title="Practice Mode" phase={6} />}
-      {mode === 'backing' && <PlaceholderMode title="Backing Track" phase={5} />}
+      {mode === 'backing' && <BackingModePanel />}
       {mode === 'busking' && <PlaceholderMode title="Busking Mode" phase={4} />}
       {mode === 'mixer' && <TrackMixerPanel />}
     </div>
