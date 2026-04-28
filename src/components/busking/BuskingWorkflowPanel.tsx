@@ -23,6 +23,14 @@ function generatedFileUrl(fileName: string): string {
   return `${getSoundServerUrl()}/outputs/${encodeURIComponent(fileName)}`;
 }
 
+function normalizeForMatch(value: string): string {
+  return (value || '')
+    .toLowerCase()
+    .replace(/\.wav$/i, '')
+    .replace(/performance_pack_\d+_\d+_\d+_/i, '')
+    .replace(/[^\p{L}\p{N}]+/gu, '');
+}
+
 type BuskingPlayerState = 'empty' | 'loading' | 'ready' | 'playing' | 'paused' | 'stopped' | 'error';
 
 export function BuskingWorkflowPanel() {
@@ -51,6 +59,15 @@ export function BuskingWorkflowPanel() {
 
   const progress = duration > 0 ? Math.max(0, Math.min(100, (currentTime / duration) * 100)) : 0;
 
+  const mismatchWarning = useMemo(() => {
+    if (!fileName) return '';
+    const scoreName = normalizeForMatch(project.name || '');
+    const audioName = normalizeForMatch(fileName);
+    if (!scoreName || !audioName) return '';
+    if (audioName.includes(scoreName) || scoreName.includes(audioName)) return '';
+    return `Audio/Score mismatch: loaded score is "${project.name}", but selected audio is "${fileName}". Load the matching GP score for accurate busking sync.`;
+  }, [fileName, project.name]);
+
   const stopSyncTimer = () => {
     if (timerRef.current !== null) {
       window.clearInterval(timerRef.current);
@@ -75,6 +92,7 @@ export function BuskingWorkflowPanel() {
     if (nextDuration > 0 && endTick > 0) {
       targetTick = Math.max(0, Math.min(endTick, Math.round((nextCurrent / nextDuration) * endTick)));
       try { engine.tickPosition = targetTick; } catch {}
+      try { engine.scrollToCursor(); } catch {}
     }
     setCurrentTime(nextCurrent);
     setDuration(nextDuration);
@@ -83,7 +101,7 @@ export function BuskingWorkflowPanel() {
 
   const startSyncTimer = () => {
     stopSyncTimer();
-    timerRef.current = window.setInterval(syncScoreToAudio, 80);
+    timerRef.current = window.setInterval(syncScoreToAudio, 120);
   };
 
   const ensureAudio = () => {
@@ -106,6 +124,7 @@ export function BuskingWorkflowPanel() {
       stopSyncTimer();
       player.currentTime = 0;
       try { engine.tickPosition = 0; } catch {}
+      try { engine.scrollToCursor(); } catch {}
       setCurrentTime(0);
       setState('stopped');
       setPlayerState('stopped');
@@ -129,6 +148,7 @@ export function BuskingWorkflowPanel() {
     player.load();
     try { engine.stop(); } catch {}
     try { engine.tickPosition = 0; } catch {}
+    try { engine.scrollToCursor(); } catch {}
     setFileName(name);
     setState('loading');
     setCurrentTime(0);
@@ -238,6 +258,7 @@ export function BuskingWorkflowPanel() {
     player.currentTime = 0;
     stopSyncTimer();
     try { engine.tickPosition = 0; } catch {}
+    try { engine.scrollToCursor(); } catch {}
     setCurrentTime(0);
     setState('stopped');
     setPlayerState('stopped');
@@ -288,7 +309,7 @@ export function BuskingWorkflowPanel() {
 
   return (
     <div className="absolute inset-0 z-20 pointer-events-none">
-      <div className="absolute left-4 right-4 top-4 pointer-events-auto rounded-2xl border border-blue-700/40 bg-slate-950/90 backdrop-blur p-4 shadow-2xl">
+      <div className="absolute left-4 right-[410px] bottom-4 pointer-events-auto rounded-2xl border border-blue-700/40 bg-slate-950/92 backdrop-blur p-4 shadow-2xl">
         <div className="flex items-center justify-between gap-4">
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-blue-300 text-xs font-semibold uppercase tracking-wider"><MonitorPlay size={15} /> Busking Sync Playback</div>
@@ -310,10 +331,11 @@ export function BuskingWorkflowPanel() {
           <input type="range" min={0} max={100} value={progress} onChange={(e) => seekPercent(Number(e.target.value))} className="w-full" />
           <div className="text-xs text-slate-400 w-24 text-right">State: {state}</div>
         </div>
+        {mismatchWarning && <div className="mt-2 rounded border border-yellow-500/40 bg-yellow-950/40 px-2 py-1.5 text-[11px] text-yellow-100">{mismatchWarning}</div>}
         {error && <div className="mt-2 rounded border border-red-500/40 bg-red-950/50 px-2 py-1.5 text-[11px] text-red-100">{error}</div>}
       </div>
 
-      <div className="absolute right-4 top-36 bottom-4 w-[380px] pointer-events-auto overflow-auto rounded-2xl border border-slate-700 bg-slate-950/88 backdrop-blur p-4 shadow-2xl">
+      <div className="absolute right-4 top-4 bottom-4 w-[380px] pointer-events-auto overflow-auto rounded-2xl border border-slate-700 bg-slate-950/88 backdrop-blur p-4 shadow-2xl">
         <div className="grid grid-cols-2 gap-3 mb-4">
           <div className="rounded-xl bg-slate-900 border border-slate-700 p-3">
             <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">RenderCache</div>
