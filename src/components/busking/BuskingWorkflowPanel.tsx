@@ -4,6 +4,10 @@ import { useArrangerStore } from '../../stores/arrangerStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useUIStore } from '../../stores/uiStore';
 
+function formatGoalLabel(value: string): string {
+  return value.replace(/_/g, ' ');
+}
+
 export function BuskingWorkflowPanel() {
   const currentPlan = useArrangerStore((s) => s.currentPlan);
   const preparePlan = useArrangerStore((s) => s.preparePlan);
@@ -50,7 +54,7 @@ export function BuskingWorkflowPanel() {
           </div>
           <div className="rounded-xl bg-slate-900 border border-slate-700 p-4">
             <div className="text-[11px] text-slate-500 uppercase tracking-wider mb-2">Performance Goal</div>
-            <div className="text-xl font-bold text-white">{currentPlan.goal.replaceAll('_', ' ')}</div>
+            <div className="text-xl font-bold text-white">{formatGoalLabel(currentPlan.goal)}</div>
             <div className="text-xs text-slate-500 mt-2">Status: {currentPlan.status}</div>
           </div>
           <div className="rounded-xl bg-slate-900 border border-slate-700 p-4">
