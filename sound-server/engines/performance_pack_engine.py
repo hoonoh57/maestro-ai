@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Tuple
 
 try:
     import numpy as np
-except Exception:  # pragma: no cover - fallback only for broken environments
+except Exception:  # pragma: no cover
     np = None  # type: ignore
 
 
@@ -179,13 +179,11 @@ def _build_numpy_master(duration: float, sample_rate: int, bpm: int, key_root: i
         bar_end = min(duration, bar_start + bar)
         chord = _scale_chord(key_root, b, 3)
         bass_note = chord[0] - 12
-
         _add_pad_section(buffer, sample_rate, bar_start, bar_end, chord, 0.075)
         _add_kick(buffer, sample_rate, bar_start, 0.55)
         _add_kick(buffer, sample_rate, bar_start + beat * 2, 0.50)
         _add_snare(buffer, sample_rate, bar_start + beat, 0.22)
         _add_snare(buffer, sample_rate, bar_start + beat * 3, 0.22)
-
         for i in range(8):
             _add_hat(buffer, sample_rate, bar_start + beat * 0.5 * i, 0.055)
         for i in range(4):
@@ -195,8 +193,81 @@ def _build_numpy_master(duration: float, sample_rate: int, bpm: int, key_root: i
             note = chord[i % 3] + 12
             _add_pluck(buffer, sample_rate, bar_start + beat * 0.5 * i + 0.015, beat * 0.48, _midi_to_hz(int(note)), 0.18, 1.08, 0.84)
 
-    buffer = _soft_clip_np(buffer * 0.72)
-    return buffer
+    return _soft_clip_np(buffer * 0.72)
+
+
+def _role_gain(role: str) -> float:
+    role = (role or "").lower()
+    if role == "bass":
+        return 0.34
+    if role == "drums":
+        return 0.28
+    if role in ("guitar", "melody", "vocal"):
+        return 0.22
+    if role in ("keys", "strings"):
+        return 0.16
+    return 0.18
+
+
+def _role_pan(role: str, track_index: int) -> Tuple[float, float]:
+    role = (role or "").lower()
+    if role == "bass":
+        return 1.0, 1.0
+    if role == "drums":
+        return 0.95, 1.05
+    if role == "guitar":
+        return 1.12 if track_index % 2 == 0 else 0.82, 0.82 if track_index % 2 == 0 else 1.12
+    if role in ("keys", "strings"):
+        return 0.72, 1.18
+    return 1.0, 1.0
+
+
+def _build_score_master(duration: float, sample_rate: int, bpm: int, score_summary: Dict[str, Any]) -> Tuple[Any, int]:
+    if np is None:
+        raise RuntimeError("numpy is required for Maestro Performance Pack rendering")
+    frames = int(sample_rate * duration)
+    buffer = np.zeros((frames, 2), dtype=np.float32)
+    notes = score_summary.get("notes") or []
+    rendered = 0
+    beat = 60.0 / max(40, min(220, bpm))
+    add_click_drums = len(notes) < 8
+
+    for item in notes[:24000]:
+        try:
+            start = float(item.get("startSeconds") or 0.0)
+            dur = float(item.get("durationSeconds") or beat)
+            midi = int(round(float(item.get("midi") or 60)))
+            role = str(item.get("role") or "other")
+            track_index = int(item.get("trackIndex") or 0)
+        except Exception:
+            continue
+        if start < 0 or start > duration:
+            continue
+        dur = max(0.04, min(5.0, dur))
+        midi = max(24, min(108, midi))
+        freq = _midi_to_hz(midi)
+        gain = _role_gain(role)
+        pan_l, pan_r = _role_pan(role, track_index)
+        if role == "bass":
+            _add_bass(buffer, sample_rate, start, dur, freq, gain)
+        else:
+            _add_pluck(buffer, sample_rate, start, dur, freq, gain, pan_l, pan_r)
+        rendered += 1
+
+    if rendered > 0:
+        bars = int(math.ceil(duration / (beat * 4)))
+        for b in range(bars):
+            bar_start = b * beat * 4
+            _add_kick(buffer, sample_rate, bar_start, 0.18)
+            _add_hat(buffer, sample_rate, bar_start + beat * 0.5, 0.022)
+            _add_hat(buffer, sample_rate, bar_start + beat * 1.5, 0.022)
+            _add_hat(buffer, sample_rate, bar_start + beat * 2.5, 0.022)
+            _add_hat(buffer, sample_rate, bar_start + beat * 3.5, 0.022)
+    elif add_click_drums:
+        key_root = _key_root(str(score_summary.get("key") or "C"))
+        buffer = _build_numpy_master(duration, sample_rate, bpm, key_root)
+
+    return _soft_clip_np(buffer * 0.82), rendered
 
 
 def _apply_pedalboard_if_available(buffer: Any, sample_rate: int) -> Any:
@@ -206,18 +277,16 @@ def _apply_pedalboard_if_available(buffer: Any, sample_rate: int) -> Any:
         from pedalboard import Pedalboard, Compressor, Gain, HighpassFilter, LowpassFilter, Reverb, Limiter
     except Exception:
         return buffer
-
     audio = np.asarray(buffer, dtype=np.float32).T
     board = Pedalboard([
         HighpassFilter(cutoff_frequency_hz=35),
         LowpassFilter(cutoff_frequency_hz=14500),
         Compressor(threshold_db=-18, ratio=2.8, attack_ms=3, release_ms=160),
-        Reverb(room_size=0.18, damping=0.46, wet_level=0.07, dry_level=0.93),
-        Gain(gain_db=1.8),
+        Reverb(room_size=0.16, damping=0.46, wet_level=0.06, dry_level=0.94),
+        Gain(gain_db=1.5),
         Limiter(threshold_db=-1.0, release_ms=80),
     ])
-    processed = board(audio, sample_rate).T
-    return np.asarray(processed, dtype=np.float32)
+    return np.asarray(board(audio, sample_rate).T, dtype=np.float32)
 
 
 def _write_wav(file_path: str, buffer: Any, sample_rate: int) -> None:
@@ -235,11 +304,12 @@ def _write_wav(file_path: str, buffer: Any, sample_rate: int) -> None:
 def render_performance_pack_audio(payload: Dict[str, Any], output_dir: str) -> RenderedAudio:
     os.makedirs(output_dir, exist_ok=True)
     plan = payload.get("plan") or {}
-    project_name = payload.get("projectName") or plan.get("title") or "MaestroAI"
-    bpm = int(plan.get("performanceBpm") or plan.get("sourceBpm") or 112)
+    score_summary = plan.get("scoreSummary") or {}
+    project_name = payload.get("projectName") or plan.get("title") or score_summary.get("title") or "MaestroAI"
+    bpm = int(plan.get("performanceBpm") or score_summary.get("bpm") or plan.get("sourceBpm") or 112)
     key = str(plan.get("recommendedKey") or plan.get("sourceKey") or "C")
     sample_rate = int(payload.get("sampleRate") or 44100)
-    duration_seconds = float(payload.get("durationSeconds") or 16.0)
+    duration_seconds = float(payload.get("durationSeconds") or score_summary.get("durationSeconds") or 16.0)
     duration_seconds = max(8.0, min(1800.0, duration_seconds))
     key_root = _key_root(key)
 
@@ -247,7 +317,14 @@ def render_performance_pack_audio(payload: Dict[str, Any], output_dir: str) -> R
     file_name = f"{job_id}_{_safe_name(project_name)}.wav"
     file_path = os.path.join(output_dir, file_name)
 
-    buffer = _build_numpy_master(duration_seconds, sample_rate, bpm, key_root)
+    note_count = len(score_summary.get("notes") or []) if isinstance(score_summary, dict) else 0
+    if note_count > 0:
+        buffer, rendered_notes = _build_score_master(duration_seconds, sample_rate, bpm, score_summary)
+        mode = f"score-note render / {rendered_notes} note events"
+    else:
+        buffer = _build_numpy_master(duration_seconds, sample_rate, bpm, key_root)
+        mode = "fallback pattern render / no score notes received"
+
     processed = _apply_pedalboard_if_available(buffer, sample_rate)
     _write_wav(file_path, processed, sample_rate)
 
@@ -257,5 +334,5 @@ def render_performance_pack_audio(payload: Dict[str, Any], output_dir: str) -> R
         file_path=file_path,
         duration_seconds=duration_seconds,
         sample_rate=sample_rate,
-        message=f"Maestro Performance Pack rendered {duration_seconds:.0f}s CPU backing master for {project_name}",
+        message=f"Maestro Performance Pack rendered {duration_seconds:.0f}s CPU backing master for {project_name} ({mode})",
     )
