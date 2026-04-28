@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { InspectorSection } from '../shared/InspectorSection';
-import { Download, Music, Pause, Play, Repeat, Square, Upload, Volume2 } from 'lucide-react';
+import { Download, FolderOpen, Music, Pause, Play, Repeat, Square, Upload, Volume2 } from 'lucide-react';
 
 type PlayerState = 'empty' | 'loading' | 'ready' | 'playing' | 'paused' | 'stopped' | 'error';
 
@@ -16,6 +16,14 @@ interface PlayerSnapshot {
   loopEnd: number;
   error: string;
 }
+
+const RENDERED_MASTER_CANDIDATES = [
+  '/rendered/performance-master.mp3',
+  '/rendered/performance-master.wav',
+  '/rendered/performance-master.flac',
+  '/rendered/performance-master.ogg',
+  '/rendered/performance-master.m4a',
+];
 
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return '00:00';
@@ -42,6 +50,11 @@ function clampRate(value: number): number {
 function isSupportedAudioFile(file: File): boolean {
   const lower = file.name.toLowerCase();
   return lower.endsWith('.mp3') || lower.endsWith('.wav') || lower.endsWith('.ogg') || lower.endsWith('.m4a') || lower.endsWith('.aac') || lower.endsWith('.flac');
+}
+
+function fileNameFromUrl(url: string): string {
+  const parts = url.split('/');
+  return parts[parts.length - 1] || url;
 }
 
 export function BackingInspector() {
@@ -163,6 +176,47 @@ export function BackingInspector() {
     }
   };
 
+  const loadAudioUrl = async (url: string, fileName?: string) => {
+    const audio = ensureAudio();
+    audio.pause();
+    releaseObjectUrl();
+    stopTimer();
+
+    audio.src = `${url}?v=${Date.now()}`;
+    audio.volume = snapshot.volume;
+    audio.playbackRate = snapshot.rate;
+    audio.preservesPitch = true;
+    audio.load();
+
+    patch({ state: 'loading', fileName: fileName || fileNameFromUrl(url), currentTime: 0, duration: 0, loopStart: 0, loopEnd: 0, error: '' });
+
+    try {
+      await ensureGraph();
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Failed to initialize WebAudio graph.';
+      patch({ state: 'error', error: message });
+    }
+  };
+
+  const loadRenderCacheMaster = async () => {
+    patch({ state: 'loading', error: 'Searching /public/rendered/performance-master.* ...' });
+    for (const url of RENDERED_MASTER_CANDIDATES) {
+      try {
+        const response = await fetch(`${url}?v=${Date.now()}`, { method: 'HEAD' });
+        if (response.ok) {
+          await loadAudioUrl(url, fileNameFromUrl(url));
+          return;
+        }
+      } catch {
+        // Try next candidate.
+      }
+    }
+    patch({
+      state: 'error',
+      error: 'No RenderCache master found. Place performance-master.mp3 or performance-master.wav under public/rendered, then click Load RenderCache Master.',
+    });
+  };
+
   const openFile = async (file: File) => {
     if (!isSupportedAudioFile(file)) {
       patch({ state: 'error', error: 'Use MP3, WAV, OGG, M4A, AAC, or FLAC for performance playback.' });
@@ -282,6 +336,12 @@ export function BackingInspector() {
         >
           <Upload size={14} /> Import MP3 / WAV / MR
         </button>
+        <button
+          onClick={() => void loadRenderCacheMaster()}
+          className="mt-2 w-full h-9 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-[12px] font-medium transition-colors flex items-center justify-center gap-2"
+        >
+          <FolderOpen size={14} /> Load RenderCache Master
+        </button>
         <input
           ref={inputRef}
           type="file"
@@ -323,14 +383,7 @@ export function BackingInspector() {
             <span>{formatTime(snapshot.currentTime)}</span>
             <span>{formatTime(snapshot.duration)}</span>
           </div>
-          <input
-            type="range"
-            min={0}
-            max={100}
-            value={progress}
-            onChange={(e) => seekPercent(Number(e.target.value))}
-            className="w-full"
-          />
+          <input type="range" min={0} max={100} value={progress} onChange={(e) => seekPercent(Number(e.target.value))} className="w-full" />
           <div className="relative h-2">
             <div className="absolute top-0 h-2 w-px bg-emerald-400" style={{ left: `${loopStartPct}%` }} />
             <div className="absolute top-0 h-2 w-px bg-orange-400" style={{ left: `${loopEndPct}%` }} />
@@ -342,14 +395,7 @@ export function BackingInspector() {
             <span className="flex items-center gap-1"><Volume2 size={12} /> Master</span>
             <span>{Math.round(snapshot.volume * 100)}%</span>
           </div>
-          <input
-            type="range"
-            min={0}
-            max={100}
-            value={Math.round(snapshot.volume * 100)}
-            onChange={(e) => setVolume(Number(e.target.value))}
-            className="w-full"
-          />
+          <input type="range" min={0} max={100} value={Math.round(snapshot.volume * 100)} onChange={(e) => setVolume(Number(e.target.value))} className="w-full" />
         </div>
 
         <div className="mt-3">
@@ -357,15 +403,7 @@ export function BackingInspector() {
             <span>Speed / Pitch Preserve</span>
             <span>{Math.round(snapshot.rate * 100)}%</span>
           </div>
-          <input
-            type="range"
-            min={50}
-            max={125}
-            step={5}
-            value={Math.round(snapshot.rate * 100)}
-            onChange={(e) => setRate(Number(e.target.value))}
-            className="w-full"
-          />
+          <input type="range" min={50} max={125} step={5} value={Math.round(snapshot.rate * 100)} onChange={(e) => setRate(Number(e.target.value))} className="w-full" />
         </div>
 
         <div className="mt-3 grid grid-cols-3 gap-2">
@@ -376,20 +414,16 @@ export function BackingInspector() {
           </button>
         </div>
 
-        <div className="mt-2 text-[11px] text-slate-500">
-          A {formatTime(snapshot.loopStart)} / B {formatTime(snapshot.loopEnd)}
-        </div>
+        <div className="mt-2 text-[11px] text-slate-500">A {formatTime(snapshot.loopStart)} / B {formatTime(snapshot.loopEnd)}</div>
 
         {snapshot.error && (
-          <div className="mt-3 rounded border border-red-500/40 bg-red-950/40 px-2 py-2 text-[11px] text-red-100">
-            {snapshot.error}
-          </div>
+          <div className="mt-3 rounded border border-red-500/40 bg-red-950/40 px-2 py-2 text-[11px] text-red-100">{snapshot.error}</div>
         )}
       </InspectorSection>
 
-      <InspectorSection title="Canonical Playback Model" icon={<Download size={12} />} defaultOpen={false}>
+      <InspectorSection title="RenderCache Folder Rule" icon={<Download size={12} />} defaultOpen={false}>
         <div className="px-3 pb-3 text-[11px] text-slate-400 leading-relaxed">
-          Score playback is for preview. Performance quality comes from rendered audio: MR, WAV, MP3, stems, or future AI-generated audio. This panel is the canonical path for stage-quality playback.
+          Place high-quality output at <span className="text-slate-200">public/rendered/performance-master.mp3</span> or <span className="text-slate-200">performance-master.wav</span>. Then click <span className="text-emerald-300">Load RenderCache Master</span>.
         </div>
       </InspectorSection>
     </div>
