@@ -26,12 +26,11 @@ export function TransportBar() {
 
   return (
     <div className="h-11 bg-[#0f172a] border-b border-slate-700/60 flex items-center px-4 gap-3 shrink-0">
-      {/* Playback Controls */}
       <div className="flex items-center gap-1">
         <IconButton
           icon={isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
           active={isPlaying}
-          onClick={() => engine.playPause()}
+          onClick={() => engine.safePlayPause()}
           title="Play/Pause (Space)"
         />
         <IconButton
@@ -48,7 +47,6 @@ export function TransportBar() {
 
       <div className="w-px h-6 bg-slate-700/60" />
 
-      {/* Transport Toggles — Phase 3 locked */}
       <div className="flex items-center gap-1 opacity-40">
         <IconButton icon={<Repeat className="w-4 h-4" />} disabled title="Loop (Phase 3)" />
         <IconButton icon={<Timer className="w-4 h-4" />} disabled title="Count-In (Phase 3)" />
@@ -58,7 +56,6 @@ export function TransportBar() {
 
       <div className="w-px h-6 bg-slate-700/60" />
 
-      {/* BPM */}
       <div className="flex items-center gap-1">
         <span className="text-xs text-slate-500">BPM</span>
         <input
@@ -71,25 +68,21 @@ export function TransportBar() {
         />
       </div>
 
-      {/* Key */}
       <div className="flex items-center gap-1">
         <span className="text-xs text-slate-500">Key</span>
         <span className="text-xs text-white bg-slate-800 border border-slate-700/50 rounded px-2 py-0.5">{key}</span>
       </div>
 
-      {/* Time Signature */}
       <span className="text-xs text-slate-400 tabular-nums">{ts}</span>
 
       <div className="w-px h-6 bg-slate-700/60" />
 
-      {/* Time */}
       <span className="text-sm text-white font-mono tabular-nums bg-slate-800 border border-slate-700/50 rounded px-2 py-0.5">
         {fmt(position.currentTime)} / {fmt(position.endTime)}
       </span>
 
       <div className="flex-1" />
 
-      {/* Master Volume */}
       <div className="flex items-center gap-2 w-36">
         <span className="text-xs text-slate-500">Vol</span>
         <Slider
