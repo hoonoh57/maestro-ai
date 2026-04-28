@@ -1,10 +1,101 @@
 import { create } from 'zustand';
 import type * as alphaTab from '@coderline/alphatab';
-import type { MaestroProject, MaestroTrack } from '../types/project';
+import type { InstrumentAssignment, InstrumentMap, MaestroProject, MaestroTrack, RenderCache, RenderProfile, TrackRole } from '../types/project';
 import { sanitizeArtistName, sanitizeScoreTitle, sanitizeTrackName } from '../services/text/TextSanitizer';
 import { applyNormalizedTrackToProjectTrack, normalizeImportedScore } from '../services/import/GpImportNormalizer';
 
 const DEFAULT_COLORS = ['#3b82f6', '#22c55e', '#ef4444', '#facc15', '#a855f7', '#ec4899', '#14b8a6', '#6366f1', '#f97316', '#78716c'];
+
+const ROLE_ORDER: TrackRole[] = ['melody', 'guitar', 'bass', 'drums', 'keys', 'strings', 'vocal', 'other'];
+
+function createDefaultProfiles(): RenderProfile[] {
+  return [
+    {
+      id: 'preview-fluidr3',
+      name: 'Preview - FluidR3 GM',
+      engine: 'soundfont',
+      libraryPath: '/soundfont/FluidR3_GM.sf2',
+      presetName: 'GM Auto',
+      quality: 'preview',
+      notes: 'Fast built-in score preview path.',
+    },
+    {
+      id: 'hq-fluidsynth',
+      name: 'High Quality - FluidSynth',
+      engine: 'fluidsynth',
+      libraryPath: 'E:/2026/maestro-ai-libraries/SoundFonts/FluidR3_GM.sf2',
+      presetName: 'GM Auto',
+      quality: 'high',
+      notes: 'External local render target. Configure path later in Library Manager.',
+    },
+    {
+      id: 'performance-external',
+      name: 'Performance - External Renderer',
+      engine: 'external',
+      libraryPath: 'E:/2026/maestro-ai-libraries/Rendered',
+      presetName: 'Rendered Audio / Stems',
+      quality: 'performance',
+      notes: 'Canonical busking output path using rendered audio cache.',
+    },
+  ];
+}
+
+function createDefaultInstrumentMap(): InstrumentMap {
+  const defaultProfileByRole = {} as Record<TrackRole, string>;
+  for (let i = 0; i < ROLE_ORDER.length; i += 1) {
+    defaultProfileByRole[ROLE_ORDER[i]] = 'preview-fluidr3';
+  }
+  return {
+    profiles: createDefaultProfiles(),
+    assignments: [],
+    defaultProfileByRole,
+  };
+}
+
+function createDefaultRenderCache(): RenderCache {
+  return {
+    masterStatus: 'empty',
+    items: [],
+    lastRenderEngine: 'preview',
+    message: 'No performance render cache yet.',
+  };
+}
+
+function createAssignment(track: MaestroTrack, existing?: InstrumentAssignment): InstrumentAssignment {
+  const role = track.role || 'other';
+  return {
+    trackId: track.id,
+    role,
+    renderProfileId: existing?.renderProfileId || 'preview-fluidr3',
+    dirty: existing?.dirty ?? true,
+    lastRenderedAt: existing?.lastRenderedAt,
+  };
+}
+
+function normalizeProjectStructure(project: MaestroProject): MaestroProject {
+  const instrumentMap = project.instrumentMap || createDefaultInstrumentMap();
+  const renderCache = project.renderCache || createDefaultRenderCache();
+  const profiles = instrumentMap.profiles && instrumentMap.profiles.length > 0 ? instrumentMap.profiles : createDefaultProfiles();
+  const existingAssignments = instrumentMap.assignments || [];
+  const assignments = project.tracks.map((track) => {
+    const existing = existingAssignments.find((item) => item.trackId === track.id);
+    return createAssignment(track, existing);
+  });
+  const defaults = instrumentMap.defaultProfileByRole || createDefaultInstrumentMap().defaultProfileByRole;
+
+  return {
+    ...project,
+    name: sanitizeScoreTitle(project.name, 'Untitled Project'),
+    artist: sanitizeArtistName(project.artist, ''),
+    tracks: project.tracks.map((track, index) => ({ ...track, name: sanitizeTrackName(track.name, index) })),
+    instrumentMap: {
+      profiles,
+      assignments,
+      defaultProfileByRole: defaults,
+    },
+    renderCache,
+  };
+}
 
 function createDefaultProject(): MaestroProject {
   return {
@@ -16,6 +107,8 @@ function createDefaultProject(): MaestroProject {
     timeSignature: '4/4',
     difficulty: 'intermediate',
     tracks: [],
+    instrumentMap: createDefaultInstrumentMap(),
+    renderCache: createDefaultRenderCache(),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -42,6 +135,8 @@ interface ProjectState {
   setTrackCollapsed: (id: string, collapsed: boolean) => void;
 
   updateTrack: (index: number, patch: Partial<MaestroTrack>) => void;
+  setTrackRenderProfile: (trackId: string, profileId: string) => void;
+  markRenderCacheDirty: (message?: string) => void;
 
   saveToLocal: () => void;
   loadFromLocal: () => boolean;
@@ -53,25 +148,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   isDirty: false,
 
   updateProject: (patch) => set((s) => ({
-    project: { ...s.project, ...patch, updatedAt: new Date().toISOString() },
+    project: normalizeProjectStructure({ ...s.project, ...patch, updatedAt: new Date().toISOString() }),
     isDirty: true,
   })),
 
   setProject: (p) => set({
-    project: {
-      ...p,
-      name: sanitizeScoreTitle(p.name, 'Untitled Project'),
-      artist: sanitizeArtistName(p.artist, ''),
-      tracks: p.tracks.map((track, index) => ({
-        ...track,
-        name: sanitizeTrackName(track.name, index),
-      })),
-    },
+    project: normalizeProjectStructure(p),
     isDirty: false,
   }),
 
   setProjectName: (name) => set((s) => ({
-    project: { ...s.project, name: sanitizeScoreTitle(name, s.project.name || 'Untitled Project'), updatedAt: new Date().toISOString() },
+    project: normalizeProjectStructure({ ...s.project, name: sanitizeScoreTitle(name, s.project.name || 'Untitled Project'), updatedAt: new Date().toISOString() }),
     isDirty: true,
   })),
 
@@ -107,15 +194,22 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       return applyNormalizedTrackToProjectTrack(baseTrack, normalizedTrack);
     });
 
-    return {
-      project: {
-        ...s.project,
-        name: normalized.title,
-        artist: normalized.artist,
-        bpm: normalized.bpm,
-        tracks,
-        updatedAt: new Date().toISOString(),
+    const nextProject = normalizeProjectStructure({
+      ...s.project,
+      name: normalized.title,
+      artist: normalized.artist,
+      bpm: normalized.bpm,
+      tracks,
+      renderCache: {
+        ...s.project.renderCache,
+        masterStatus: 'dirty',
+        message: 'Score changed. Performance render cache needs refresh.',
       },
+      updatedAt: new Date().toISOString(),
+    });
+
+    return {
+      project: nextProject,
       isDirty: true,
     };
   }),
@@ -132,14 +226,22 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       solo: false,
       collapsed: false,
     };
-    return {
-      project: { ...s.project, tracks: [...s.project.tracks, newTrack], updatedAt: new Date().toISOString() },
-      isDirty: true,
-    };
+    const nextProject = normalizeProjectStructure({
+      ...s.project,
+      tracks: [...s.project.tracks, newTrack],
+      renderCache: { ...s.project.renderCache, masterStatus: 'dirty', message: 'Track added. Render cache needs refresh.' },
+      updatedAt: new Date().toISOString(),
+    });
+    return { project: nextProject, isDirty: true };
   }),
 
   removeTrack: (id) => set((s) => ({
-    project: { ...s.project, tracks: s.project.tracks.filter(t => t.id !== id), updatedAt: new Date().toISOString() },
+    project: normalizeProjectStructure({
+      ...s.project,
+      tracks: s.project.tracks.filter(t => t.id !== id),
+      renderCache: { ...s.project.renderCache, masterStatus: 'dirty', message: 'Track removed. Render cache needs refresh.' },
+      updatedAt: new Date().toISOString(),
+    }),
     isDirty: true,
   })),
 
@@ -150,7 +252,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const idx = s.project.tracks.findIndex(t => t.id === id);
     const tracks = [...s.project.tracks];
     tracks.splice(idx + 1, 0, dup);
-    return { project: { ...s.project, tracks, updatedAt: new Date().toISOString() }, isDirty: true };
+    return {
+      project: normalizeProjectStructure({
+        ...s.project,
+        tracks,
+        renderCache: { ...s.project.renderCache, masterStatus: 'dirty', message: 'Track duplicated. Render cache needs refresh.' },
+        updatedAt: new Date().toISOString(),
+      }),
+      isDirty: true,
+    };
   }),
 
   setTrackMute: (id, mute) => set((s) => ({
@@ -177,14 +287,41 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       tracks[index] = { ...tracks[index], ...nextPatch };
     }
     return {
-      project: { ...s.project, tracks, updatedAt: new Date().toISOString() },
+      project: normalizeProjectStructure({
+        ...s.project,
+        tracks,
+        renderCache: { ...s.project.renderCache, masterStatus: 'dirty', message: 'Track edited. Performance render cache needs refresh.' },
+        updatedAt: new Date().toISOString(),
+      }),
       isDirty: true,
     };
   }),
 
+  setTrackRenderProfile: (trackId, profileId) => set((s) => ({
+    project: normalizeProjectStructure({
+      ...s.project,
+      instrumentMap: {
+        ...s.project.instrumentMap,
+        assignments: s.project.instrumentMap.assignments.map((assignment) => assignment.trackId === trackId ? { ...assignment, renderProfileId: profileId, dirty: true } : assignment),
+      },
+      renderCache: { ...s.project.renderCache, masterStatus: 'dirty', message: 'Instrument renderer changed. Render cache needs refresh.' },
+      updatedAt: new Date().toISOString(),
+    }),
+    isDirty: true,
+  })),
+
+  markRenderCacheDirty: (message) => set((s) => ({
+    project: {
+      ...s.project,
+      renderCache: { ...s.project.renderCache, masterStatus: 'dirty', message: message || 'Performance render cache needs refresh.' },
+      updatedAt: new Date().toISOString(),
+    },
+    isDirty: true,
+  })),
+
   saveToLocal: () => {
     const { project } = get();
-    localStorage.setItem(`maestro_project_${project.id}`, JSON.stringify(project));
+    localStorage.setItem(`maestro_project_${project.id}`, JSON.stringify(normalizeProjectStructure(project)));
     localStorage.setItem('maestro_last_project_id', project.id);
     set({ isDirty: false });
   },
@@ -196,15 +333,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (!raw) return false;
     try {
       const parsed = JSON.parse(raw) as MaestroProject;
-      set({
-        project: {
-          ...parsed,
-          name: sanitizeScoreTitle(parsed.name, 'Untitled Project'),
-          artist: sanitizeArtistName(parsed.artist, ''),
-          tracks: parsed.tracks.map((track, index) => ({ ...track, name: sanitizeTrackName(track.name, index) })),
-        },
-        isDirty: false,
-      });
+      set({ project: normalizeProjectStructure(parsed), isDirty: false });
       return true;
     } catch { return false; }
   },
