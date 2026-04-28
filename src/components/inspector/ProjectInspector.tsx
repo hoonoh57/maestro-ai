@@ -3,6 +3,7 @@ import { InspectorSection } from '../shared/InspectorSection';
 import { TextField } from '../shared/TextField';
 import { NumberField } from '../shared/NumberField';
 import { SelectField } from '../shared/SelectField';
+import { PlaybackQualityPanel } from '../playback/PlaybackQualityPanel';
 import { FileText, Music, Settings2 } from 'lucide-react';
 
 const KEY_OPTIONS = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'].map((k) => ({ value: k, label: k }));
@@ -29,6 +30,7 @@ export function ProjectInspector() {
         <SelectField label="Key" value={project.key} options={KEY_OPTIONS} onChange={(v) => update({ key: v })} />
         <SelectField label="Time Sig." value={project.timeSignature} options={TIME_SIG_OPTIONS} onChange={(v) => update({ timeSignature: v })} />
       </InspectorSection>
+      <PlaybackQualityPanel />
       <InspectorSection title="Difficulty" icon={<Settings2 size={12} />} defaultOpen={false}>
         <SelectField label="Level" value={project.difficulty || 'intermediate'} options={DIFFICULTY_OPTIONS} onChange={(v) => update({ difficulty: v })} />
       </InspectorSection>
