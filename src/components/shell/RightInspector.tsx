@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { PanelRight, X } from 'lucide-react';
 import { useUIStore } from '../../stores/uiStore';
 import { useEditorStore } from '../../stores/editorStore';
@@ -17,6 +17,7 @@ function useInspectorContext(): InspectorContext {
   const mode = useUIStore((s) => s.mode);
   const selectedNoteId = useEditorStore((s) => s.selectedNoteId);
   const selectedTrackIndex = useEditorStore((s) => s.selectedTrackIndex);
+  const tracks = useProjectStore((s) => s.project.tracks);
 
   return useMemo(() => {
     switch (mode) {
@@ -29,9 +30,10 @@ function useInspectorContext(): InspectorContext {
       default:
         if (selectedNoteId !== null) return 'note';
         if (selectedTrackIndex !== null) return 'track';
+        if (tracks.length > 0) return 'track';
         return 'project';
     }
-  }, [mode, selectedNoteId, selectedTrackIndex]);
+  }, [mode, selectedNoteId, selectedTrackIndex, tracks.length]);
 }
 
 const contextLabels: Record<InspectorContext, string> = {
@@ -43,10 +45,11 @@ function InspectorBreadcrumb({ context }: { context: InspectorContext }) {
   const name = useProjectStore((s) => s.project.name);
   const selectedTrackIndex = useEditorStore((s) => s.selectedTrackIndex);
   const tracks = useProjectStore((s) => s.project.tracks);
-  const trackName = selectedTrackIndex !== null ? tracks[selectedTrackIndex]?.name : null;
+  const effectiveTrackIndex = selectedTrackIndex ?? (tracks.length > 0 ? 0 : null);
+  const trackName = effectiveTrackIndex !== null ? tracks[effectiveTrackIndex]?.name : null;
 
   const crumbs: string[] = [name || 'Untitled'];
-  if (context === 'track' || context === 'note') crumbs.push(trackName || `Track ${(selectedTrackIndex ?? 0) + 1}`);
+  if (context === 'track' || context === 'note') crumbs.push(trackName || `Track ${(effectiveTrackIndex ?? 0) + 1}`);
   if (context === 'note') crumbs.push('Note');
   if (['practice', 'backing', 'busking'].includes(context)) crumbs.push(contextLabels[context]);
 
@@ -77,7 +80,19 @@ function InspectorContent({ context }: { context: InspectorContext }) {
 export function RightInspector() {
   const inspectorVisible = useUIStore((s) => s.inspectorVisible);
   const toggleInspector = useUIStore((s) => s.toggleInspector);
+  const selectedTrackIndex = useEditorStore((s) => s.selectedTrackIndex);
+  const setSelectedTrackIndex = useEditorStore((s) => s.setSelectedTrackIndex);
+  const selectedNoteId = useEditorStore((s) => s.selectedNoteId);
+  const tracks = useProjectStore((s) => s.project.tracks);
   const context = useInspectorContext();
+
+  useEffect(() => {
+    if (useUIStore.getState().mode !== 'editor') return;
+    if (selectedNoteId !== null) return;
+    if (selectedTrackIndex !== null) return;
+    if (tracks.length <= 0) return;
+    setSelectedTrackIndex(0);
+  }, [selectedNoteId, selectedTrackIndex, setSelectedTrackIndex, tracks.length]);
 
   if (!inspectorVisible) return null;
 
