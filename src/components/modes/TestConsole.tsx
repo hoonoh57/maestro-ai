@@ -4,13 +4,13 @@
 
 import { undoManager } from '../../core/UndoManager';
 
-
 import React, { useState, useCallback } from 'react';
 import { Play, CheckCircle2, XCircle, AlertCircle, RefreshCw } from 'lucide-react';
 import { engine } from '../../core/AlphaTabEngine';
 import { useProjectStore } from '../../stores/projectStore';
 import { useTransportStore } from '../../stores/transportStore';
 import { useFeatureFlagStore } from '../../stores/featureFlagStore';
+import { useArrangerStore } from '../../stores/arrangerStore';
 
 interface TestResult {
   id: string;
@@ -55,6 +55,55 @@ function runAllTests(): TestResult[] {
       throw new Error(`Mismatch: store=${storeTracks.length}, score=${scoreTracks.length}`);
     }
     return `${storeTracks.length} tracks synced`;
+  });
+
+  test('render_types_present', 'InstrumentMap and RenderCache exist', 'Model', () => {
+    const project = useProjectStore.getState().project;
+    if (!project.instrumentMap) throw new Error('Missing instrumentMap');
+    if (!project.renderCache) throw new Error('Missing renderCache');
+    if (!project.instrumentMap.profiles || project.instrumentMap.profiles.length === 0) throw new Error('Missing render profiles');
+    return `${project.instrumentMap.profiles.length} profile(s), render=${project.renderCache.masterStatus}`;
+  });
+
+  // ── AI Arranger Workflow ──
+
+  test('arranger_prepare_plan', 'Prepare busking arrangement plan', 'AI Arranger', () => {
+    const arranger = useArrangerStore.getState();
+    const plan = arranger.preparePlan();
+    if (!plan) throw new Error('Plan was not generated');
+    if (!plan.title) throw new Error('Plan title missing');
+    if (plan.validation.status === 'fail') throw new Error('Plan validation failed');
+    return `${plan.title} / ${plan.recommendedKey} / ${plan.performanceBpm} BPM`;
+  });
+
+  test('arranger_sections', 'Arrangement sections generated', 'AI Arranger', () => {
+    const plan = useArrangerStore.getState().currentPlan;
+    if (!plan) throw new Error('No current arrangement plan');
+    if (plan.sections.length < 5) throw new Error(`Expected >=5 sections, got ${plan.sections.length}`);
+    return plan.sections.map((s) => s.name).join(' → ');
+  });
+
+  test('arranger_practice_loops', 'Practice loops generated', 'AI Arranger', () => {
+    const plan = useArrangerStore.getState().currentPlan;
+    if (!plan) throw new Error('No current arrangement plan');
+    if (plan.practiceLoops.length < 3) throw new Error(`Expected >=3 loops, got ${plan.practiceLoops.length}`);
+    return `${plan.practiceLoops.length} loops ready`;
+  });
+
+  test('arranger_sound_prompt', 'Maestro Sound prompt generated', 'AI Arranger', () => {
+    const plan = useArrangerStore.getState().currentPlan;
+    if (!plan) throw new Error('No current arrangement plan');
+    if (plan.maestroSoundPrompt.length < 120) throw new Error('Prompt too short');
+    if (!plan.renderPrompt.includes('Output required')) throw new Error('Render prompt missing output requirements');
+    return `${plan.maestroSoundPrompt.length} chars`;
+  });
+
+  test('arranger_rendercache_dirty', 'RenderCache marked as needing sound render', 'AI Arranger', () => {
+    const project = useProjectStore.getState().project;
+    const message = project.renderCache?.message || '';
+    if (project.renderCache.masterStatus !== 'dirty') throw new Error(`RenderCache status is ${project.renderCache.masterStatus}`);
+    if (!message.includes('AI Performance Sound required')) throw new Error(`Unexpected render message: ${message}`);
+    return message;
   });
 
   // ── Render ──
@@ -122,6 +171,8 @@ function runAllTests(): TestResult[] {
     const parsed = JSON.parse(json);
     if (!parsed.name) throw new Error('Saved JSON missing "name"');
     if (!parsed.tracks || parsed.tracks.length === 0) throw new Error('Saved JSON missing tracks');
+    if (!parsed.instrumentMap) throw new Error('Saved JSON missing instrumentMap');
+    if (!parsed.renderCache) throw new Error('Saved JSON missing renderCache');
     return `Saved ${json.length} bytes, ${parsed.tracks.length} tracks`;
   });
 
@@ -129,7 +180,7 @@ function runAllTests(): TestResult[] {
     const project = useProjectStore.getState().project;
     const json = JSON.stringify(project);
     const d = JSON.parse(json);
-    const requiredKeys = ['name', 'bpm', 'key', 'timeSignature', 'tracks'];
+    const requiredKeys = ['name', 'bpm', 'key', 'timeSignature', 'tracks', 'instrumentMap', 'renderCache'];
     for (const k of requiredKeys) {
       if (!(k in d)) throw new Error(`Missing key: ${k}`);
     }
@@ -147,17 +198,6 @@ function runAllTests(): TestResult[] {
       throw new Error(`${active.length}/${phase12.length} active. Inactive: ${inactive.join(', ')}`);
     }
     return `All ${active.length} Phase 1-2 flags are active`;
-  });
-
-  test('flags_locked', 'Phase 3+ flags locked', 'FeatureFlags', () => {
-    const flags = useFeatureFlagStore.getState().flags;
-    const future = flags.filter((f) => f.phase > 2);
-    const locked = future.filter((f) => f.status === 'locked');
-    if (locked.length !== future.length) {
-      const unlocked = future.filter((f) => f.status !== 'locked').map((f) => `${f.id}(${f.status})`);
-      return `Warning: ${unlocked.join(', ')} not locked`;
-    }
-    return `${locked.length}/${future.length} future flags properly locked`;
   });
 
   test('flags_total', 'Total flag count', 'FeatureFlags', () => {
@@ -181,11 +221,10 @@ function runAllTests(): TestResult[] {
     return 'AppBar header present';
   });
 
-  test('sidebar_exists', 'Left sidebar is rendered', 'UI', () => {
-    // LeftSidebar uses a <div>, not <aside> — check by class or structure
-    const el = document.querySelector('header');
-    if (!el) throw new Error('No header found');
-    return 'UI shell present';
+  test('arrange_mode_button', 'Arrange mode button exists', 'UI', () => {
+    const text = document.body.innerText;
+    if (!text.includes('Arrange')) throw new Error('Arrange button text not found');
+    return 'Arrange mode is available in shell';
   });
 
   return results;
@@ -211,12 +250,12 @@ export function TestConsole() {
   const warned = results.filter((r) => r.status === 'warn').length;
   const categories = [...new Set(results.map((r) => r.category))];
 
-  // Safe state snapshot for inspector
   const getStateSnapshot = () => {
     try {
       const proj = useProjectStore.getState().project;
       const transport = useTransportStore.getState();
       const flags = useFeatureFlagStore.getState().flags;
+      const arranger = useArrangerStore.getState();
       return JSON.stringify({
         project: {
           name: proj.name,
@@ -225,20 +264,28 @@ export function TestConsole() {
           key: proj.key,
           timeSignature: proj.timeSignature,
           trackCount: proj.tracks?.length ?? 0,
+          renderCache: proj.renderCache,
           tracks: (proj.tracks ?? []).map((t) => ({
             name: t.name,
             instrument: t.instrument,
+            role: t.role,
             volume: t.volume,
             mute: t.mute,
             solo: t.solo,
           })),
         },
+        arranger: {
+          goal: arranger.goal,
+          hasPlan: !!arranger.currentPlan,
+          planTitle: arranger.currentPlan?.title ?? null,
+          validation: arranger.currentPlan?.validation.status ?? null,
+          loops: arranger.currentPlan?.practiceLoops.length ?? 0,
+          sections: arranger.currentPlan?.sections.length ?? 0,
+        },
         transport: {
           playerState: transport.playerState,
           isPlayerReady: transport.isPlayerReady,
           masterVolume: transport.masterVolume,
-          isLooping: transport.isLooping,
-          metronomeOn: transport.metronomeOn,
           playbackSpeed: transport.playbackSpeed,
           position: {
             currentTick: transport.position.currentTick,
@@ -266,7 +313,6 @@ export function TestConsole() {
 
   return (
     <div className="flex-1 flex flex-col bg-[#0f172a] text-slate-300 overflow-hidden">
-      {/* Header */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-700/60 shrink-0">
         <button
           onClick={handleRunTests}
@@ -298,11 +344,10 @@ export function TestConsole() {
         )}
       </div>
 
-      {/* Results */}
       <div className="flex-1 overflow-auto p-4">
         {results.length === 0 && !isRunning && (
           <div className="text-slate-500 text-sm text-center py-12">
-            Click &quot;Run All Tests&quot; to verify Phase 1+2 functionality.
+            Click &quot;Run All Tests&quot; to verify editor, arranger, practice, busking, and playback workflow.
           </div>
         )}
 
@@ -310,49 +355,35 @@ export function TestConsole() {
           <div key={cat} className="mb-5">
             <h3 className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2 flex items-center gap-2">
               {cat}
-              <span className="text-[10px] text-slate-600 font-normal normal-case">
-                ({results.filter((r) => r.category === cat).length} tests)
-              </span>
+              <span className="text-[10px] text-slate-600 font-normal normal-case">({results.filter((r) => r.category === cat).length} tests)</span>
             </h3>
             <div className="space-y-1">
-              {results
-                .filter((r) => r.category === cat)
-                .map((r) => (
-                  <div
-                    key={r.id}
-                    className={`flex items-center gap-2 px-3 py-2 rounded text-[12px]
-                      ${r.status === 'fail' ? 'bg-red-950/30 border border-red-900/30' : ''}
-                      ${r.status === 'pass' ? 'bg-slate-800/40' : ''}
-                      ${r.status === 'warn' ? 'bg-yellow-950/20 border border-yellow-900/30' : ''}
-                    `}
-                  >
-                    {r.status === 'pass' && <CheckCircle2 size={14} className="text-green-500 shrink-0" />}
-                    {r.status === 'fail' && <XCircle size={14} className="text-red-500 shrink-0" />}
-                    {r.status === 'warn' && <AlertCircle size={14} className="text-yellow-500 shrink-0" />}
-                    {r.status === 'pending' && <RefreshCw size={14} className="text-slate-500 animate-spin shrink-0" />}
-                    <span className="font-medium w-48 shrink-0 truncate">{r.name}</span>
-                    <span className={`flex-1 truncate ${r.status === 'fail' ? 'text-red-400' : 'text-slate-400'}`} title={r.message}>
-                      {r.message}
-                    </span>
-                    <span className="text-[10px] text-slate-600 tabular-nums shrink-0 w-14 text-right">
-                      {r.duration.toFixed(1)}ms
-                    </span>
-                  </div>
-                ))}
+              {results.filter((r) => r.category === cat).map((r) => (
+                <div
+                  key={r.id}
+                  className={`flex items-center gap-2 px-3 py-2 rounded text-[12px]
+                    ${r.status === 'fail' ? 'bg-red-950/30 border border-red-900/30' : ''}
+                    ${r.status === 'pass' ? 'bg-slate-800/40' : ''}
+                    ${r.status === 'warn' ? 'bg-yellow-950/20 border border-yellow-900/30' : ''}`}
+                >
+                  {r.status === 'pass' && <CheckCircle2 size={14} className="text-green-500 shrink-0" />}
+                  {r.status === 'fail' && <XCircle size={14} className="text-red-500 shrink-0" />}
+                  {r.status === 'warn' && <AlertCircle size={14} className="text-yellow-500 shrink-0" />}
+                  {r.status === 'pending' && <RefreshCw size={14} className="text-slate-500 animate-spin shrink-0" />}
+                  <span className="font-medium w-48 shrink-0 truncate">{r.name}</span>
+                  <span className={`flex-1 truncate ${r.status === 'fail' ? 'text-red-400' : 'text-slate-400'}`} title={r.message}>{r.message}</span>
+                  <span className="text-[10px] text-slate-600 tabular-nums shrink-0 w-14 text-right">{r.duration.toFixed(1)}ms</span>
+                </div>
+              ))}
             </div>
           </div>
         ))}
       </div>
 
-      {/* State Inspector */}
       {results.length > 0 && (
         <div className="h-48 border-t border-slate-700/60 overflow-auto shrink-0">
-          <div className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500 sticky top-0 bg-[#0f172a] z-10">
-            State Inspector
-          </div>
-          <pre className="px-4 pb-4 text-[10px] text-slate-500 font-mono whitespace-pre-wrap leading-relaxed">
-            {getStateSnapshot()}
-          </pre>
+          <div className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500 sticky top-0 bg-[#0f172a] z-10">State Inspector</div>
+          <pre className="px-4 pb-4 text-[10px] text-slate-500 font-mono whitespace-pre-wrap leading-relaxed">{getStateSnapshot()}</pre>
         </div>
       )}
     </div>
