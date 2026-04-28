@@ -5,15 +5,8 @@ import { TestConsole } from '../modes/TestConsole';
 import { TrackMixerPanel } from '../mixer/TrackMixerPanel';
 import { BackingInspector } from '../inspector/BackingInspector';
 import { BuskingArrangePanel } from '../arranger/BuskingArrangePanel';
-
-function PlaceholderMode({ title, phase }: { title: string; phase: number }) {
-  return (
-    <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#1e293b] text-slate-500 z-10">
-      <span className="text-xl font-semibold mb-1">{title}</span>
-      <span className="text-[12px]">Phase {phase} — Coming Soon</span>
-    </div>
-  );
-}
+import { PracticeWorkflowPanel } from '../practice/PracticeWorkflowPanel';
+import { BuskingWorkflowPanel } from '../busking/BuskingWorkflowPanel';
 
 function BackingModePanel() {
   return (
@@ -44,9 +37,9 @@ export function MainViewport() {
         </div>
       )}
       {mode === 'arrange' && <BuskingArrangePanel />}
-      {mode === 'practice' && <PlaceholderMode title="Practice Mode" phase={6} />}
+      {mode === 'practice' && <PracticeWorkflowPanel />}
       {mode === 'backing' && <BackingModePanel />}
-      {mode === 'busking' && <PlaceholderMode title="Busking Mode" phase={4} />}
+      {mode === 'busking' && <BuskingWorkflowPanel />}
       {mode === 'mixer' && <TrackMixerPanel />}
     </div>
   );
