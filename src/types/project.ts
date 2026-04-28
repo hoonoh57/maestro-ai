@@ -11,6 +11,8 @@ export interface MaestroProject {
   updatedAt: string;
 }
 
+export type TrackRole = 'melody' | 'guitar' | 'bass' | 'drums' | 'keys' | 'strings' | 'vocal' | 'other';
+
 export interface MaestroTrack {
   id: string;
   name: string;
@@ -22,7 +24,10 @@ export interface MaestroTrack {
   solo: boolean;
   collapsed: boolean;
   atTrackIndex?: number;
-  // TrackInspector에서 사용하는 추가 필드
+  role?: TrackRole;
+  isDrum?: boolean;
+  normalized?: boolean;
+  normalizationNotes?: string[];
   clef?: string;
   capo?: number;
   tuning?: string;
