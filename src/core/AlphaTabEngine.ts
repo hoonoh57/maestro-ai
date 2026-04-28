@@ -61,6 +61,17 @@ function clamp01(value: number): number {
   return value;
 }
 
+function normalMidiChannelForTrack(trackIndex: number): number {
+  const channel = trackIndex % 15;
+  return channel >= 9 ? channel + 1 : channel;
+}
+
+function secondaryMidiChannel(primaryChannel: number): number {
+  let secondary = (primaryChannel + 1) % 16;
+  if (secondary === 9) secondary = (secondary + 1) % 16;
+  return secondary;
+}
+
 const GM_PROGRAM_BY_INSTRUMENT: Record<string, number> = {
   acoustic_guitar: 24,
   electric_guitar: 27,
@@ -329,14 +340,21 @@ export class AlphaTabEngine {
 
   setTrackInstrument(trackIndex: number, instrument: string): boolean {
     if (this.api === null || this.score === null) return false;
-    const track = this.score.tracks[trackIndex];
+    const score = this.score;
+    const track = score.tracks[trackIndex];
     if (!track) return false;
     const playbackInfo = (track as any).playbackInfo;
     if (!playbackInfo) return false;
 
     const program = GM_PROGRAM_BY_INSTRUMENT[instrument] ?? 0;
-    playbackInfo.program = program;
+    const primaryChannel = instrument === 'drums' ? 9 : normalMidiChannelForTrack(trackIndex);
+    const secondaryChannel = instrument === 'drums' ? 9 : secondaryMidiChannel(primaryChannel);
 
+    playbackInfo.program = program;
+    playbackInfo.bank = 0;
+    playbackInfo.port = 0;
+    playbackInfo.primaryChannel = primaryChannel;
+    playbackInfo.secondaryChannel = secondaryChannel;
     if (instrument === 'drums') playbackInfo.isPercussion = true;
     else if (typeof playbackInfo.isPercussion === 'boolean') playbackInfo.isPercussion = false;
 
@@ -344,12 +362,14 @@ export class AlphaTabEngine {
       this.clearPendingPlay();
       if (this.currentPlayerState === 'playing') this.api.stop();
       this._isPlayerReady = false;
-      const apiAny = this.api as any;
-      if (typeof apiAny.loadMidiForScore === 'function') apiAny.loadMidiForScore();
-      else if (typeof apiAny.updateSettings === 'function') apiAny.updateSettings();
-      this.api.renderTracks(this.score.tracks);
-      this.normalizePlaybackDefaults();
-      console.info('[AlphaTabEngine] Track instrument changed', { trackIndex, instrument, program });
+      this.api.load(score, score.tracks.map((_t, i) => i));
+      console.info('[AlphaTabEngine] Track instrument remapped and score reloaded', {
+        trackIndex,
+        instrument,
+        program,
+        primaryChannel,
+        secondaryChannel,
+      });
     } catch (e: unknown) {
       this.reportError(toError(e));
     }
