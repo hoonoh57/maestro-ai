@@ -39,9 +39,9 @@ export function MaestroSoundPanel() {
     setSoundServerUrl(serverUrl);
     try {
       const health = await checkServer();
-      setMessage(`Sound server OK: ${health.name} ${health.version} / engines: ${health.engines.join(', ')}`);
+      setMessage(`Sound runtime OK: ${health.name} ${health.version} / engines: ${health.engines.join(', ')}`);
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : 'Sound server check failed.');
+      setMessage(e instanceof Error ? e.message : 'Sound runtime check failed.');
     }
   };
 
@@ -49,14 +49,14 @@ export function MaestroSoundPanel() {
     setEngine(value as MaestroSoundEngineKind);
   };
 
-  const isServerEngine = engine === 'ace_step' || engine === 'local_ai' || engine === 'external_runtime';
+  const isServerEngine = engine === 'performance_pack' || engine === 'ace_step' || engine === 'local_ai' || engine === 'external_runtime';
 
   return (
     <section className="rounded-xl bg-slate-900 border border-slate-700 p-4">
       <div className="flex items-start justify-between gap-4 mb-3">
         <div>
-          <div className="flex items-center gap-2 text-sm font-semibold text-white"><Sparkles size={15} /> Maestro Sound Engine</div>
-          <div className="text-xs text-slate-500 mt-1">ACE-Step is the default target. Mock engines remain available for pipeline validation until ACE-Step is installed.</div>
+          <div className="flex items-center gap-2 text-sm font-semibold text-white"><Sparkles size={15} /> Performance Sound</div>
+          <div className="text-xs text-slate-500 mt-1">Maestro Performance Pack is the default CPU backing/playing engine. AI engines remain available as advanced generation options.</div>
         </div>
         <div className={`px-2.5 py-1 rounded-full text-[11px] ${status === 'ready' ? 'bg-emerald-900/40 text-emerald-300' : status === 'rendering' ? 'bg-blue-900/40 text-blue-300' : status === 'error' ? 'bg-red-900/40 text-red-300' : 'bg-slate-800 text-slate-400'}`}>{status}</div>
       </div>
@@ -80,7 +80,8 @@ export function MaestroSoundPanel() {
         <div>
           <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Engine</div>
           <select value={engine} onChange={(e) => handleEngineChange(e.target.value)} className="w-full h-9 rounded bg-slate-950 border border-slate-700 px-2 text-xs text-slate-200 outline-none focus:border-blue-500">
-            <option value="ace_step">ACE-Step AI</option>
+            <option value="performance_pack">Maestro Performance Pack</option>
+            <option value="ace_step">AI Maestro Sound - ACE-Step</option>
             <option value="local_ai">Local Server Mock</option>
             <option value="mock">Browser Mock</option>
             <option value="external_runtime">External Runtime</option>
@@ -95,15 +96,21 @@ export function MaestroSoundPanel() {
         </div>
       </div>
 
+      {engine === 'performance_pack' && (
+        <div className="mb-3 rounded border border-emerald-700/40 bg-emerald-950/20 px-3 py-2 text-[11px] text-emerald-200 leading-relaxed">
+          기본 공연/연습 엔진입니다. GPU 없이 CPU에서 WAV backing master를 만들고, Pedalboard가 설치되어 있으면 컴프레서/리버브/리미터 체인을 적용합니다.
+        </div>
+      )}
+
       {engine === 'ace_step' && (
         <div className="mb-3 rounded border border-blue-700/40 bg-blue-950/20 px-3 py-2 text-[11px] text-blue-200 leading-relaxed">
-          ACE-Step is selected as the default production target. If it is not installed in the local runtime yet, Generate will return an explicit install/integration message. Use Local Server Mock only to verify the pipeline.
+          ACE-Step is an advanced AI generation engine. It requires an ACE-Step runtime or future cloud runtime, while the Performance Pack remains the base CPU engine.
         </div>
       )}
 
       {lastHealth && (
         <div className="mb-3 rounded border border-emerald-700/40 bg-emerald-950/20 px-3 py-2 text-[11px] text-emerald-200">
-          Server: {lastHealth.name} {lastHealth.version} / engines: {lastHealth.engines.join(', ')}
+          Runtime: {lastHealth.name} {lastHealth.version} / engines: {lastHealth.engines.join(', ')}
         </div>
       )}
 
@@ -114,7 +121,7 @@ export function MaestroSoundPanel() {
           className="h-9 px-4 rounded bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 text-white text-sm font-medium flex items-center gap-2"
         >
           {status === 'rendering' ? <Loader2 size={14} className="animate-spin" /> : <Waves size={14} />}
-          Generate Maestro Sound
+          Generate Performance Sound
         </button>
         <button
           onClick={() => setMode('backing')}
@@ -126,7 +133,7 @@ export function MaestroSoundPanel() {
       </div>
 
       {isServerEngine && !lastHealth && (
-        <div className="mt-3 text-[11px] text-slate-500 leading-relaxed">For server engines, click Check first to verify the local runtime.</div>
+        <div className="mt-3 text-[11px] text-slate-500 leading-relaxed">For runtime engines, click Check first to verify the local sound runtime.</div>
       )}
 
       {(message || lastError) && (
