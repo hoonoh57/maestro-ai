@@ -3,6 +3,7 @@ import { CheckCircle2, Clipboard, Guitar, ListMusic, Music2, PlayCircle, Refresh
 import { useArrangerStore } from '../../stores/arrangerStore';
 import { useProjectStore } from '../../stores/projectStore';
 import type { BuskingGoal } from '../../services/arranger/BuskingArrangementService';
+import { MaestroSoundPanel } from '../sound/MaestroSoundPanel';
 
 const GOALS: { id: BuskingGoal; label: string; desc: string }[] = [
   { id: 'solo_acoustic', label: 'Solo Acoustic', desc: 'One-person busking guitar-centered version' },
@@ -39,7 +40,7 @@ export function BuskingArrangePanel() {
             </div>
             <h1 className="text-2xl font-bold text-white">Prepare Busking Version</h1>
             <p className="mt-2 text-sm text-slate-400 max-w-[760px] leading-relaxed">
-              Convert the current score project into a performance-oriented arrangement plan: structure, key/capo, practice loops, busking cues, and Maestro Sound prompts. This validates the full workflow before the audio generation engine is attached.
+              Convert the current score project into a performance-oriented arrangement plan: structure, key/capo, practice loops, busking cues, and Maestro Sound prompts. Then generate a test Maestro Sound master into RenderCache.
             </p>
           </div>
           <button
@@ -90,6 +91,8 @@ export function BuskingArrangePanel() {
 
         {currentPlan && (
           <div className="space-y-4">
+            <MaestroSoundPanel />
+
             <div className="rounded-xl bg-slate-900 border border-slate-700 p-4">
               <div className="flex items-center justify-between gap-3 mb-3">
                 <div>
