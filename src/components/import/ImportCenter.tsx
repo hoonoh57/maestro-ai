@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { FileAudio, FileImage, FileText, Music, Sparkles, Upload, X } from 'lucide-react';
-import { inspectImportFile } from '../../services/import/FileImportService';
+import { inspectImportFile, SCORE_FILE_ACCEPT } from '../../services/import/FileImportService';
 
 interface ImportCenterProps {
   onOpenFile: (file: File) => void;
@@ -47,10 +47,12 @@ export function ImportCenter({ onOpenFile, onOpenPrompt, onLoadDemo, onShowOmrIn
     const info = inspectImportFile(file);
     if (!info.canLoadDirectly) {
       onShowOmrInfo(info.message);
+      if (fileInputRef.current) fileInputRef.current.value = '';
       return;
     }
 
     onOpenFile(file);
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   return (
@@ -82,7 +84,7 @@ export function ImportCenter({ onOpenFile, onOpenPrompt, onLoadDemo, onShowOmrIn
           <ActionCard
             icon={<Upload className="w-5 h-5" />}
             title="Open score file"
-            description="Load .gp, .gp3, .gp4, .gp5, .gpx, .musicxml, .mxl, .atx, .txt."
+            description="Load .gp, .gp3, .gp4, .gp5, .gp6, .gp7, .gp8, .gpx, .musicxml, .mxl, .atx, .txt."
             onClick={openFilePicker}
           />
           <ActionCard
@@ -114,7 +116,7 @@ export function ImportCenter({ onOpenFile, onOpenPrompt, onLoadDemo, onShowOmrIn
           ref={fileInputRef}
           type="file"
           className="hidden"
-          accept=".gp,.gp3,.gp4,.gp5,.gpx,.musicxml,.xml,.mxl,.atx,.tex,.txt,.pdf,.png,.jpg,.jpeg,.webp"
+          accept={SCORE_FILE_ACCEPT}
           onChange={(e) => handleFiles(e.target.files)}
         />
       </div>
