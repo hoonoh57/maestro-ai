@@ -1,6 +1,6 @@
 import type { BuskingArrangementPlan } from '../arranger/BuskingArrangementService';
 
-export type MaestroSoundEngineKind = 'ace_step' | 'mock' | 'local_ai' | 'cloud_ai' | 'external_runtime';
+export type MaestroSoundEngineKind = 'performance_pack' | 'ace_step' | 'mock' | 'local_ai' | 'cloud_ai' | 'external_runtime';
 export type MaestroSoundJobStatus = 'idle' | 'queued' | 'rendering' | 'ready' | 'error';
 
 export interface MaestroSoundRenderRequest {
