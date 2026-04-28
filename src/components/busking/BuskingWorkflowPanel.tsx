@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Mic2, MonitorPlay, Music, Pause, Play, RefreshCw, Route, Square, Sparkles } from 'lucide-react';
 import { engine } from '../../core/AlphaTabEngine';
+import { getSoundServerUrl } from '../../services/sound/LocalMaestroSoundEngine';
 import { useArrangerStore } from '../../stores/arrangerStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useTransportStore } from '../../stores/transportStore';
@@ -16,6 +17,10 @@ function formatTime(seconds: number): string {
   const min = Math.floor(total / 60);
   const sec = total % 60;
   return `${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+}
+
+function generatedFileUrl(fileName: string): string {
+  return `${getSoundServerUrl()}/outputs/${encodeURIComponent(fileName)}`;
 }
 
 type BuskingPlayerState = 'empty' | 'loading' | 'ready' | 'playing' | 'paused' | 'stopped' | 'error';
@@ -37,6 +42,8 @@ export function BuskingWorkflowPanel() {
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [error, setError] = useState('');
+  const [generatedFiles, setGeneratedFiles] = useState<string[]>([]);
+  const [isRefreshingFiles, setIsRefreshingFiles] = useState(false);
 
   const masterItem = useMemo(() => {
     return project.renderCache?.items?.find((item) => item.kind === 'master' && item.status === 'ready' && item.fileUrl) || null;
@@ -129,33 +136,60 @@ export function BuskingWorkflowPanel() {
     setError('');
   };
 
+  const loadRemoteAsBlob = async (url: string, name: string) => {
+    setState('loading');
+    setFileName(name);
+    setError('Loading rendered performance audio...');
+    try {
+      const response = await fetch(`${url}${url.includes('?') ? '&' : '?'}v=${Date.now()}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const blob = await response.blob();
+      if (blob.size <= 44) throw new Error('Downloaded audio blob is empty.');
+      releaseObjectUrl();
+      const objectUrl = URL.createObjectURL(blob);
+      objectUrlRef.current = objectUrl;
+      await loadUrl(objectUrl, name);
+    } catch (e) {
+      setState('error');
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   const loadMaster = async () => {
     if (!masterItem) {
       setState('error');
-      setError('No rendered master found. Use Arrange > Generate Performance Sound first.');
+      setError('No rendered master in current project. Select a generated master from the list or generate a new one.');
       return;
     }
     const url = masterItem.fileUrl;
     if (url.startsWith('http://') || url.startsWith('https://')) {
-      setState('loading');
-      setFileName(masterItem.fileName);
-      setError('Loading rendered performance audio...');
-      try {
-        const response = await fetch(`${url}${url.includes('?') ? '&' : '?'}v=${Date.now()}`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const blob = await response.blob();
-        if (blob.size <= 44) throw new Error('Downloaded audio blob is empty.');
-        releaseObjectUrl();
-        const objectUrl = URL.createObjectURL(blob);
-        objectUrlRef.current = objectUrl;
-        await loadUrl(objectUrl, masterItem.fileName);
-      } catch (e) {
-        setState('error');
-        setError(e instanceof Error ? e.message : String(e));
-      }
+      await loadRemoteAsBlob(url, masterItem.fileName);
       return;
     }
     await loadUrl(url, masterItem.fileName);
+  };
+
+  const refreshGeneratedFiles = async () => {
+    setIsRefreshingFiles(true);
+    try {
+      const response = await fetch(`${getSoundServerUrl()}/api/sound/jobs?v=${Date.now()}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json() as { files?: string[] };
+      const files = (payload.files || [])
+        .filter((name) => name.toLowerCase().endsWith('.wav'))
+        .sort()
+        .reverse();
+      setGeneratedFiles(files);
+      if (files.length > 0) setError('');
+    } catch (e) {
+      setError(e instanceof Error ? `Generated list failed: ${e.message}` : 'Generated list failed.');
+    } finally {
+      setIsRefreshingFiles(false);
+    }
+  };
+
+  const loadGeneratedFile = async (name: string) => {
+    await loadRemoteAsBlob(generatedFileUrl(name), name);
   };
 
   const playPause = async () => {
@@ -164,7 +198,7 @@ export function BuskingWorkflowPanel() {
     const active = ensureAudio();
     if (!active.src) {
       setState('error');
-      setError('No busking audio loaded. Generate Performance Sound first.');
+      setError('No busking audio loaded. Select a generated master or generate Performance Sound first.');
       return;
     }
     if (state === 'playing') {
@@ -200,6 +234,10 @@ export function BuskingWorkflowPanel() {
     player.currentTime = (Math.max(0, Math.min(100, percent)) / 100) * d;
     syncScoreToAudio();
   };
+
+  useEffect(() => {
+    void refreshGeneratedFiles();
+  }, []);
 
   useEffect(() => {
     if (masterItem && state === 'empty') void loadMaster();
@@ -241,10 +279,10 @@ export function BuskingWorkflowPanel() {
               <h1 className="text-xl font-bold text-white truncate">{project.name || currentPlan.title}</h1>
               <span className="text-xs text-slate-400 shrink-0">{currentPlan.recommendedKey} · Capo {currentPlan.capo} · {currentPlan.performanceBpm} BPM · {formatGoalLabel(currentPlan.goal)}</span>
             </div>
-            <div className="mt-1 text-[11px] text-slate-500 truncate">{fileName || 'No rendered performance audio loaded.'}</div>
+            <div className="mt-1 text-[11px] text-slate-500 truncate">{fileName || 'Select a generated master from the list.'}</div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <button onClick={() => void loadMaster()} disabled={!masterItem} className="h-9 px-3 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-100 text-xs flex items-center gap-1.5"><Music size={14} /> Load Master</button>
+            <button onClick={() => void loadMaster()} disabled={!masterItem} className="h-9 px-3 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-100 text-xs flex items-center gap-1.5"><Music size={14} /> Current Master</button>
             <button onClick={() => void playPause()} className="h-10 px-5 rounded bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold flex items-center gap-2">{state === 'playing' ? <Pause size={15} /> : <Play size={15} />}{state === 'playing' ? 'Pause' : 'Play'}</button>
             <button onClick={stop} className="h-10 px-3 rounded bg-slate-800 hover:bg-slate-700 text-slate-100"><Square size={15} /></button>
             <button onClick={() => setMode('backing')} className="h-9 px-3 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-xs">Backing</button>
@@ -258,7 +296,7 @@ export function BuskingWorkflowPanel() {
         {error && <div className="mt-2 rounded border border-red-500/40 bg-red-950/50 px-2 py-1.5 text-[11px] text-red-100">{error}</div>}
       </div>
 
-      <div className="absolute right-4 top-36 bottom-4 w-[360px] pointer-events-auto overflow-auto rounded-2xl border border-slate-700 bg-slate-950/88 backdrop-blur p-4 shadow-2xl">
+      <div className="absolute right-4 top-36 bottom-4 w-[380px] pointer-events-auto overflow-auto rounded-2xl border border-slate-700 bg-slate-950/88 backdrop-blur p-4 shadow-2xl">
         <div className="grid grid-cols-2 gap-3 mb-4">
           <div className="rounded-xl bg-slate-900 border border-slate-700 p-3">
             <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">RenderCache</div>
@@ -269,6 +307,22 @@ export function BuskingWorkflowPanel() {
             <div className="text-lg font-bold text-white">{transportPosition.endTick > 0 ? 'Ready' : 'Waiting'}</div>
           </div>
         </div>
+
+        <section className="mb-4">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2 text-sm font-semibold text-white"><Music size={15} /> Generated Masters</div>
+            <button onClick={() => void refreshGeneratedFiles()} className="h-7 px-2 rounded bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-200 flex items-center gap-1"><RefreshCw size={12} className={isRefreshingFiles ? 'animate-spin' : ''} /> Refresh</button>
+          </div>
+          <div className="space-y-1 max-h-44 overflow-auto pr-1">
+            {generatedFiles.length === 0 && <div className="rounded bg-slate-900/90 border border-slate-800 p-3 text-xs text-slate-500">No generated WAV files found yet.</div>}
+            {generatedFiles.map((name) => (
+              <button key={name} onClick={() => void loadGeneratedFile(name)} className={`w-full text-left rounded border p-2 text-xs transition-colors ${fileName === name ? 'bg-blue-950/70 border-blue-600 text-blue-100' : 'bg-slate-900/90 border-slate-800 text-slate-300 hover:bg-slate-800'}`}>
+                <div className="truncate font-medium">{name}</div>
+                <div className="text-[10px] text-slate-500 mt-0.5">Click to load for busking playback</div>
+              </button>
+            ))}
+          </div>
+        </section>
 
         <section className="mb-4">
           <div className="flex items-center gap-2 text-sm font-semibold text-white mb-2"><Route size={15} /> Stage Route</div>
