@@ -6,6 +6,7 @@ import { useFileOperations } from '../../hooks/useFileOperations';
 
 const MODES: { id: AppMode; label: string }[] = [
   { id: 'editor', label: 'Editor' },
+  { id: 'arrange', label: 'Arrange' },
   { id: 'practice', label: 'Practice' },
   { id: 'backing', label: 'Backing' },
   { id: 'busking', label: 'Busking' },
