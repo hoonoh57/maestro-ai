@@ -61,6 +61,19 @@ function clamp01(value: number): number {
   return value;
 }
 
+const GM_PROGRAM_BY_INSTRUMENT: Record<string, number> = {
+  acoustic_guitar: 24,
+  electric_guitar: 27,
+  bass: 33,
+  piano: 0,
+  drums: 0,
+  violin: 40,
+  vocals: 52,
+  synth: 80,
+  ukulele: 24,
+  other: 0,
+};
+
 export class AlphaTabEngine {
   private api: alphaTab.AlphaTabApi | null = null;
   private callbacks: EngineCallbacks = {};
@@ -350,6 +363,33 @@ export class AlphaTabEngine {
     const apiAny = this.api as any;
     if (typeof apiAny.resize === 'function') apiAny.resize();
     this.api.render();
+  }
+
+  setTrackInstrument(trackIndex: number, instrument: string): boolean {
+    if (this.api === null || this.score === null) return false;
+    const track = this.score.tracks[trackIndex];
+    if (!track) return false;
+
+    const playbackInfo = (track as any).playbackInfo;
+    if (!playbackInfo) return false;
+
+    const program = GM_PROGRAM_BY_INSTRUMENT[instrument] ?? 0;
+    playbackInfo.program = program;
+
+    if (instrument === 'drums') {
+      playbackInfo.isPercussion = true;
+    } else if (typeof playbackInfo.isPercussion === 'boolean') {
+      playbackInfo.isPercussion = false;
+    }
+
+    try {
+      if (this.currentPlayerState === 'playing') this.api.stop();
+      this.api.renderTracks(this.score.tracks);
+    } catch (e: unknown) {
+      this.reportError(toError(e));
+    }
+
+    return true;
   }
 
   play(): void { this.safePlay(); }
