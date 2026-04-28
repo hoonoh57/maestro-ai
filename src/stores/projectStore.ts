@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type * as alphaTab from '@coderline/alphatab';
 import type { MaestroProject, MaestroTrack } from '../types/project';
 import { sanitizeArtistName, sanitizeScoreTitle, sanitizeTrackName } from '../services/text/TextSanitizer';
+import { applyNormalizedTrackToProjectTrack, normalizeImportedScore } from '../services/import/GpImportNormalizer';
 
 const DEFAULT_COLORS = ['#3b82f6', '#22c55e', '#ef4444', '#facc15', '#a855f7', '#ec4899', '#14b8a6', '#6366f1', '#f97316', '#78716c'];
 
@@ -85,27 +86,33 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   })),
 
   syncFromScore: (score) => set((s) => {
-    const safeProjectName = sanitizeScoreTitle(score.title, s.project.name || 'Untitled Project');
-    const safeArtist = sanitizeArtistName(score.artist, s.project.artist || '');
+    const normalized = normalizeImportedScore(score, s.project.name || 'Untitled Project');
 
-    const tracks: MaestroTrack[] = score.tracks.map((t: any, i: number) => ({
-      id: `track-${i}`,
-      name: sanitizeTrackName(t.name, i),
-      instrument: t.playbackInfo?.program?.toString() ?? 'acoustic_guitar',
-      color: DEFAULT_COLORS[i % DEFAULT_COLORS.length],
-      volume: Math.round(((t.playbackInfo?.volume ?? 15) / 16) * 100),
-      pan: ((t.playbackInfo?.balance ?? 64) - 64) * 100 / 64,
-      mute: false,
-      solo: false,
-      collapsed: false,
-      atTrackIndex: i,
-    }));
+    const tracks: MaestroTrack[] = score.tracks.map((t: any, i: number) => {
+      const baseTrack: MaestroTrack = {
+        id: `track-${i}`,
+        name: sanitizeTrackName(t.name, i),
+        instrument: t.playbackInfo?.program?.toString() ?? 'acoustic_guitar',
+        color: DEFAULT_COLORS[i % DEFAULT_COLORS.length],
+        volume: Math.round(((t.playbackInfo?.volume ?? 15) / 16) * 100),
+        pan: ((t.playbackInfo?.balance ?? 64) - 64) * 100 / 64,
+        mute: false,
+        solo: false,
+        collapsed: false,
+        atTrackIndex: i,
+      };
+
+      const normalizedTrack = normalized.tracks[i];
+      if (!normalizedTrack) return baseTrack;
+      return applyNormalizedTrackToProjectTrack(baseTrack, normalizedTrack);
+    });
+
     return {
       project: {
         ...s.project,
-        name: safeProjectName,
-        artist: safeArtist,
-        bpm: score.tempo || s.project.bpm,
+        name: normalized.title,
+        artist: normalized.artist,
+        bpm: normalized.bpm,
         tracks,
         updatedAt: new Date().toISOString(),
       },
