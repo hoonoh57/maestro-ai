@@ -5,6 +5,7 @@ export interface SoundServerHealth {
   name: string;
   version: string;
   engines: string[];
+  defaultEngine: MaestroSoundEngineKind;
   outputBaseUrl: string;
 }
 
@@ -43,7 +44,16 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
 }
 
 function toEngineKind(value: string, fallback: MaestroSoundEngineKind): MaestroSoundEngineKind {
-  if (value === 'ace_step' || value === 'mock' || value === 'local_ai' || value === 'cloud_ai' || value === 'external_runtime') return value;
+  if (
+    value === 'performance_pack' ||
+    value === 'ace_step' ||
+    value === 'mock' ||
+    value === 'local_ai' ||
+    value === 'cloud_ai' ||
+    value === 'external_runtime'
+  ) {
+    return value;
+  }
   return fallback;
 }
 
