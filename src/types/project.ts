@@ -7,11 +7,59 @@ export interface MaestroProject {
   timeSignature: string;
   difficulty?: string;
   tracks: MaestroTrack[];
+  instrumentMap: InstrumentMap;
+  renderCache: RenderCache;
   createdAt: string;
   updatedAt: string;
 }
 
 export type TrackRole = 'melody' | 'guitar' | 'bass' | 'drums' | 'keys' | 'strings' | 'vocal' | 'other';
+export type RenderEngineKind = 'preview' | 'soundfont' | 'fluidsynth' | 'musescore' | 'jjazzlab' | 'external' | 'manual_audio';
+export type RenderCacheStatus = 'empty' | 'dirty' | 'rendering' | 'ready' | 'error';
+
+export interface RenderProfile {
+  id: string;
+  name: string;
+  engine: RenderEngineKind;
+  libraryPath: string;
+  presetName: string;
+  quality: 'preview' | 'high' | 'performance';
+  notes?: string;
+}
+
+export interface InstrumentAssignment {
+  trackId: string;
+  role: TrackRole;
+  renderProfileId: string;
+  dirty: boolean;
+  lastRenderedAt?: string;
+}
+
+export interface InstrumentMap {
+  profiles: RenderProfile[];
+  assignments: InstrumentAssignment[];
+  defaultProfileByRole: Record<TrackRole, string>;
+}
+
+export interface RenderCacheItem {
+  id: string;
+  trackId?: string;
+  kind: 'track' | 'stem' | 'master';
+  status: RenderCacheStatus;
+  fileName: string;
+  fileUrl: string;
+  duration: number;
+  updatedAt?: string;
+  error?: string;
+}
+
+export interface RenderCache {
+  masterStatus: RenderCacheStatus;
+  items: RenderCacheItem[];
+  lastRenderEngine: RenderEngineKind;
+  lastRenderedAt?: string;
+  message?: string;
+}
 
 export interface MaestroTrack {
   id: string;
