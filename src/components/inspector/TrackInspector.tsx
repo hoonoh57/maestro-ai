@@ -8,6 +8,7 @@ import { ToggleField } from '../shared/ToggleField';
 import { NumberField } from '../shared/NumberField';
 import { ColorDot } from '../shared/ColorDot';
 import { PropertyRow } from '../shared/PropertyRow';
+import { PlaybackQualityPanel } from '../playback/PlaybackQualityPanel';
 import { Layers, Volume2, Palette } from 'lucide-react';
 
 const INSTRUMENT_OPTIONS = [
@@ -37,13 +38,16 @@ const TRACK_COLORS = [
 
 export function TrackInspector() {
   const selectedTrackIndex = useEditorStore((s) => s.selectedTrackIndex);
-  const tracks = useProjectStore((s) => s.project.tracks);       // ★ 수정: s.project.tracks
-  const updateTrack = useProjectStore((s) => s.updateTrack);     // ★ 수정: 새로 추가된 메서드
+  const tracks = useProjectStore((s) => s.project.tracks);
+  const updateTrack = useProjectStore((s) => s.updateTrack);
 
   if (selectedTrackIndex === null || !tracks[selectedTrackIndex]) {
     return (
-      <div className="flex items-center justify-center h-32 text-slate-500 text-[12px]">
-        No track selected
+      <div>
+        <div className="flex items-center justify-center h-32 text-slate-500 text-[12px]">
+          No track selected
+        </div>
+        <PlaybackQualityPanel />
       </div>
     );
   }
@@ -122,6 +126,8 @@ export function TrackInspector() {
           onChange={(v) => set({ solo: v })}
         />
       </InspectorSection>
+
+      <PlaybackQualityPanel />
 
       {/* Display */}
       <InspectorSection title="Display" icon={<Palette size={12} />} defaultOpen={false}>
