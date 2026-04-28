@@ -30,23 +30,47 @@ function Test-Port([int]$port) {
     }
 }
 
-function Get-PortPid([int]$port) {
+function Get-PortPids([int]$port) {
+    $pids = New-Object System.Collections.Generic.List[int]
     $lines = netstat -ano -p tcp | Select-String ":$port"
     foreach ($line in $lines) {
         $text = $line.ToString().Trim()
         if ($text -match "LISTENING\s+(\d+)$") {
-            return [int]$Matches[1]
+            $pidValue = [int]$Matches[1]
+            if ($pidValue -gt 0 -and -not $pids.Contains($pidValue)) {
+                $pids.Add($pidValue)
+            }
         }
     }
-    return 0
+    return $pids.ToArray()
 }
 
-function Stop-PortProcess([int]$port, [string]$name) {
-    $pidValue = Get-PortPid $port
-    if ($pidValue -le 0) { return }
-    Write-Step "Stopping stale $name on port $port, PID=$pidValue..."
-    Stop-Process -Id $pidValue -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Milliseconds 600
+function Show-PortDiagnostics([int]$port) {
+    Write-Host "[maestro-dev] Port $port diagnostics:" -ForegroundColor Yellow
+    netstat -ano -p tcp | findstr ":$port" | Out-Host
+    $pids = Get-PortPids $port
+    foreach ($pidValue in $pids) {
+        try {
+            Get-CimInstance Win32_Process -Filter "ProcessId=$pidValue" |
+                Select-Object ProcessId, Name, ExecutablePath, CommandLine |
+                Format-List | Out-Host
+        } catch {
+            Write-Host "[maestro-dev] Could not inspect PID=$pidValue" -ForegroundColor Yellow
+        }
+    }
+}
+
+function Stop-PortListeners([int]$port, [string]$name) {
+    $pids = Get-PortPids $port
+    foreach ($pidValue in $pids) {
+        Write-Step "Stopping $name listener on port $port, PID=$pidValue..."
+        try {
+            & taskkill.exe /PID $pidValue /T /F | Out-Null
+        } catch {
+            Stop-Process -Id $pidValue -Force -ErrorAction SilentlyContinue
+        }
+    }
+    Start-Sleep -Milliseconds 800
 }
 
 function Wait-Port([int]$port, [int]$timeoutSeconds) {
@@ -70,6 +94,16 @@ function Get-SoundServerHealth() {
     } catch {
         return $null
     }
+}
+
+function Write-SoundServerHealth() {
+    $health = Get-SoundServerHealth
+    if ($null -eq $health) {
+        Write-Host '[maestro-dev] Sound server health: not available.' -ForegroundColor Yellow
+        return
+    }
+    Write-Host '[maestro-dev] Sound server health:' -ForegroundColor Yellow
+    $health | ConvertTo-Json -Depth 10 | Out-Host
 }
 
 function Is-SoundServerCurrent() {
@@ -111,7 +145,15 @@ function Start-SoundServer() {
             return
         }
         Write-Step 'Old or incompatible sound server detected on 127.0.0.1:8765.'
-        Stop-PortProcess 8765 'MaestroAI Sound Server'
+        Write-SoundServerHealth
+        Show-PortDiagnostics 8765
+        Stop-PortListeners 8765 'MaestroAI Sound Server'
+    }
+
+    if (Test-Port 8765) {
+        Write-Host 'Port 8765 is still busy after cleanup.' -ForegroundColor Red
+        Show-PortDiagnostics 8765
+        throw 'Port 8765 cleanup failed.'
     }
 
     Ensure-SoundServerVenv
@@ -119,7 +161,7 @@ function Start-SoundServer() {
     Write-Step 'Starting MaestroAI Sound Server on 127.0.0.1:8765...'
     $windowStyle = if ($ShowSoundServer) { 'Normal' } else { 'Hidden' }
     $process = Start-Process -FilePath $venvPython `
-        -ArgumentList 'app.py' `
+        -ArgumentList @('-m', 'uvicorn', 'app:app', '--host', '127.0.0.1', '--port', '8765') `
         -WorkingDirectory $soundDir `
         -WindowStyle $windowStyle `
         -RedirectStandardOutput $soundOutLog `
@@ -128,7 +170,7 @@ function Start-SoundServer() {
     Set-Content -Path $soundPidFile -Value $process.Id -Encoding ascii
 
     if (-not (Wait-Port 8765 20)) {
-        Write-Host "Sound server failed to start." -ForegroundColor Red
+        Write-Host 'Sound server failed to start.' -ForegroundColor Red
         Write-Host "stdout: $soundOutLog" -ForegroundColor Yellow
         Write-Host "stderr: $soundErrLog" -ForegroundColor Yellow
         if (Test-Path $soundOutLog) { Get-Content $soundOutLog -Tail 30 }
@@ -136,8 +178,12 @@ function Start-SoundServer() {
         throw 'Sound server startup failed.'
     }
     if (-not (Is-SoundServerCurrent)) {
-        Write-Host "Sound server started but contract is not current." -ForegroundColor Red
+        Write-Host 'Sound server started but contract is not current.' -ForegroundColor Red
+        Write-SoundServerHealth
+        Show-PortDiagnostics 8765
+        if (Test-Path $soundOutLog) { Get-Content $soundOutLog -Tail 40 }
         if (Test-Path $soundErrLog) { Get-Content $soundErrLog -Tail 80 }
+        Stop-PortListeners 8765 'MaestroAI Sound Server'
         throw 'Sound server contract mismatch.'
     }
     Write-Step 'Sound server ready: 0.3.0 / performance_pack.'
