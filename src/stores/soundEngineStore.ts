@@ -19,11 +19,11 @@ interface SoundEngineState {
 }
 
 function shouldUseLocalServer(engine: MaestroSoundEngineKind): boolean {
-  return engine === 'ace_step' || engine === 'local_ai' || engine === 'external_runtime';
+  return engine === 'performance_pack' || engine === 'ace_step' || engine === 'local_ai' || engine === 'external_runtime';
 }
 
 export const useSoundEngineStore = create<SoundEngineState>((set, get) => ({
-  engine: 'ace_step',
+  engine: 'performance_pack',
   status: 'idle',
   lastResult: null,
   lastHealth: null,
@@ -66,7 +66,7 @@ export const useSoundEngineStore = create<SoundEngineState>((set, get) => ({
         plan,
         engine,
         sampleRate: 44100,
-        durationSeconds: 10,
+        durationSeconds: 16,
       };
 
       const result = shouldUseLocalServer(engine)
