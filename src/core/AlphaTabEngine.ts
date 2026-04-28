@@ -18,6 +18,9 @@ export interface EngineDiagnostics {
   lastContainerWidth: number;
   lastContainerHeight: number;
   lastError: string | null;
+  currentPlayerState: PlayerState;
+  playbackSpeed: number;
+  lastScoreLoadTime: number;
 }
 
 export interface EngineCallbacks {
@@ -60,6 +63,9 @@ export class AlphaTabEngine {
   private lastError: string | null = null;
   private lastContainerWidth = 0;
   private lastContainerHeight = 0;
+  private currentPlayerState: PlayerState = 'stopped';
+  private lastScoreLoadTime = 0;
+  private pendingPlayTimer: number | null = null;
 
   get isInitialized(): boolean { return this.api !== null; }
   get isPlayerReady(): boolean { return this._isPlayerReady; }
@@ -77,6 +83,9 @@ export class AlphaTabEngine {
       lastContainerWidth: this.lastContainerWidth,
       lastContainerHeight: this.lastContainerHeight,
       lastError: this.lastError,
+      currentPlayerState: this.currentPlayerState,
+      playbackSpeed: this.api?.playbackSpeed ?? 1,
+      lastScoreLoadTime: this.lastScoreLoadTime,
     };
   }
 
@@ -110,6 +119,8 @@ export class AlphaTabEngine {
     this.scoreLoadedCount = 0;
     this.renderFinishedCount = 0;
     this.lastError = null;
+    this.currentPlayerState = 'stopped';
+    this.lastScoreLoadTime = 0;
 
     const settings: any = {
       core: {
@@ -146,6 +157,7 @@ export class AlphaTabEngine {
     try {
       container.innerHTML = '';
       this.api = new alphaTab.AlphaTabApi(container, settings);
+      this.normalizePlaybackDefaults();
       this.bindEvents();
       console.info('[AlphaTabEngine] Initialized', this.getDiagnostics());
       return true;
@@ -161,6 +173,8 @@ export class AlphaTabEngine {
 
     this.api.scoreLoaded.on((score: alphaTab.model.Score) => {
       this.scoreLoadedCount += 1;
+      this.lastScoreLoadTime = Date.now();
+      this.normalizeAfterScoreLoad();
       this.callbacks.onScoreLoaded?.(score);
     });
 
@@ -172,6 +186,7 @@ export class AlphaTabEngine {
 
     this.api.playerReady.on(() => {
       this._isPlayerReady = true;
+      this.normalizePlaybackDefaults();
       this.callbacks.onPlayerReady?.();
     });
 
@@ -179,6 +194,7 @@ export class AlphaTabEngine {
       let state: PlayerState = 'stopped';
       if (e.state === alphaTab.synth.PlayerState.Playing) state = 'playing';
       else if (e.state === alphaTab.synth.PlayerState.Paused) state = 'paused';
+      this.currentPlayerState = state;
       this.callbacks.onPlayerStateChanged?.(state);
     });
 
@@ -222,12 +238,46 @@ export class AlphaTabEngine {
     this.callbacks.onError?.(error);
   }
 
+  private normalizePlaybackDefaults(): void {
+    if (this.api === null) return;
+    this.api.playbackSpeed = 1;
+    this.api.masterVolume = 0.8;
+    this.api.metronomeVolume = 0;
+    this.api.countInVolume = 0;
+    this.api.isLooping = false;
+  }
+
+  private normalizeAfterScoreLoad(): void {
+    if (this.api === null) return;
+    this.clearPendingPlay();
+    try { this.api.stop(); } catch {}
+    try { this.api.tickPosition = 0; } catch {}
+    this.currentPlayerState = 'stopped';
+    this._isPlayerReady = false;
+    this.normalizePlaybackDefaults();
+  }
+
+  private clearPendingPlay(): void {
+    if (this.pendingPlayTimer !== null) {
+      window.clearTimeout(this.pendingPlayTimer);
+      this.pendingPlayTimer = null;
+    }
+  }
+
+  private getPlaybackStabilizationDelay(): number {
+    const trackCount = this.score?.tracks?.length ?? this.tracks.length ?? 1;
+    const baseDelay = 180;
+    const trackDelay = Math.min(800, Math.max(0, trackCount - 1) * 120);
+    return baseDelay + trackDelay;
+  }
+
   loadFile(data: ArrayBuffer): boolean {
     if (this.api === null) {
       this.reportError(new Error('[AlphaTabEngine] Cannot load file before init.'));
       return false;
     }
     try {
+      this.normalizeAfterScoreLoad();
       this.api.load(data);
       return true;
     } catch (e: unknown) {
@@ -242,6 +292,7 @@ export class AlphaTabEngine {
       return false;
     }
     try {
+      this.normalizeAfterScoreLoad();
       this.api.tex(tex, 'all');
       return true;
     } catch (e: unknown) {
@@ -261,16 +312,47 @@ export class AlphaTabEngine {
 
   forceLayoutRefresh(): void {
     if (this.api === null) return;
+    if (this.currentPlayerState === 'playing') return;
     this.refreshContainerSize();
     const apiAny = this.api as any;
     if (typeof apiAny.resize === 'function') apiAny.resize();
     this.api.render();
   }
 
-  play(): void { this.api?.play(); }
+  play(): void { this.safePlay(); }
   pause(): void { this.api?.pause(); }
-  playPause(): void { this.api?.playPause(); }
-  stop(): void { this.api?.stop(); }
+  playPause(): void { this.safePlayPause(); }
+  stop(): void {
+    this.clearPendingPlay();
+    this.api?.stop();
+  }
+
+  safePlay(): void {
+    if (this.api === null) return;
+    this.clearPendingPlay();
+    this.normalizePlaybackDefaults();
+
+    const delay = this.getPlaybackStabilizationDelay();
+    this.pendingPlayTimer = window.setTimeout(() => {
+      this.pendingPlayTimer = null;
+      if (this.api === null) return;
+      if (!this._isPlayerReady) {
+        this.pendingPlayTimer = window.setTimeout(() => this.safePlay(), 200);
+        return;
+      }
+      this.api.play();
+    }, delay);
+  }
+
+  safePlayPause(): void {
+    if (this.api === null) return;
+    if (this.currentPlayerState === 'playing') {
+      this.clearPendingPlay();
+      this.api.pause();
+      return;
+    }
+    this.safePlay();
+  }
 
   setPlaybackSpeed(speed: number): void {
     if (this.api !== null && Number.isFinite(speed) && speed > 0) this.api.playbackSpeed = speed;
@@ -301,12 +383,14 @@ export class AlphaTabEngine {
   }
 
   destroy(): void {
+    this.clearPendingPlay();
     try { this.api?.destroy(); } catch (e: unknown) { console.warn('[AlphaTabEngine] destroy warning', e); }
     if (this.container !== null) this.container.innerHTML = '';
     this.api = null;
     this.container = null;
     this.viewport = null;
     this._isPlayerReady = false;
+    this.currentPlayerState = 'stopped';
   }
 }
 
