@@ -89,8 +89,10 @@ export function BuskingWorkflowPanel() {
       setDuration(d);
       setCurrentTime(0);
       setState('ready');
+      setError('');
       setTransportPosition({ currentTick: 0, endTick: transportPosition.endTick, currentTime: 0, endTime: d * 1000 });
     });
+    player.addEventListener('canplaythrough', () => { setState('ready'); setError(''); });
     player.addEventListener('play', () => { setState('playing'); setPlayerState('playing'); startSyncTimer(); });
     player.addEventListener('pause', () => { if (!player.ended) { setState('paused'); setPlayerState('paused'); } stopSyncTimer(); });
     player.addEventListener('ended', () => {
@@ -111,7 +113,7 @@ export function BuskingWorkflowPanel() {
     const player = ensureAudio();
     player.pause();
     stopSyncTimer();
-    releaseObjectUrl();
+    if (objectUrlRef.current && objectUrlRef.current !== url) releaseObjectUrl();
     player.crossOrigin = url.startsWith('blob:') ? '' : 'anonymous';
     player.src = url;
     player.volume = 0.92;
@@ -143,6 +145,7 @@ export function BuskingWorkflowPanel() {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const blob = await response.blob();
         if (blob.size <= 44) throw new Error('Downloaded audio blob is empty.');
+        releaseObjectUrl();
         const objectUrl = URL.createObjectURL(blob);
         objectUrlRef.current = objectUrl;
         await loadUrl(objectUrl, masterItem.fileName);
