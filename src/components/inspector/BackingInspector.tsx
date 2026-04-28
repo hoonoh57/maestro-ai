@@ -133,6 +133,7 @@ export function BackingInspector() {
     const audio = new Audio();
     audio.preload = 'auto';
     audio.preservesPitch = true;
+    audio.crossOrigin = 'anonymous';
     audio.addEventListener('loadedmetadata', () => patch({ duration: audio.duration || 0, currentTime: 0, loopStart: 0, loopEnd: audio.duration || 0 }));
     audio.addEventListener('canplaythrough', () => patch({ state: 'ready', duration: audio.duration || 0 }));
     audio.addEventListener('play', () => { patch({ state: 'playing' }); startTimer(); });
@@ -185,6 +186,7 @@ export function BackingInspector() {
     if (!url.startsWith('blob:')) releaseObjectUrl();
     stopTimer();
 
+    audio.crossOrigin = url.startsWith('blob:') ? '' : 'anonymous';
     audio.src = url.startsWith('blob:') ? url : `${url}?v=${Date.now()}`;
     audio.volume = snapshot.volume;
     audio.playbackRate = snapshot.rate;
@@ -201,12 +203,35 @@ export function BackingInspector() {
     }
   };
 
+  const loadRemoteAudioAsBlob = async (url: string, fileName: string) => {
+    patch({ state: 'loading', fileName, error: 'Downloading generated audio into browser blob...' });
+    try {
+      const response = await fetch(`${url}${url.includes('?') ? '&' : '?'}v=${Date.now()}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const blob = await response.blob();
+      if (blob.size <= 44) throw new Error('Downloaded audio blob is empty or invalid.');
+      releaseObjectUrl();
+      const objectUrl = URL.createObjectURL(blob);
+      objectUrlRef.current = objectUrl;
+      await loadAudioUrl(objectUrl, fileName);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      patch({ state: 'error', error: `Generated audio download failed: ${message}` });
+    }
+  };
+
   const loadGeneratedRenderCacheMaster = async () => {
     const item = renderCache?.items?.find((cacheItem) => cacheItem.kind === 'master' && cacheItem.status === 'ready' && cacheItem.fileUrl);
     if (!item) {
       patch({ state: 'error', error: 'No generated Maestro Sound master in RenderCache. Use Arrange → Generate Maestro Sound first.' });
       return;
     }
+
+    if (item.fileUrl.startsWith('http://') || item.fileUrl.startsWith('https://')) {
+      await loadRemoteAudioAsBlob(item.fileUrl, item.fileName);
+      return;
+    }
+
     await loadAudioUrl(item.fileUrl, item.fileName);
   };
 
@@ -214,7 +239,11 @@ export function BackingInspector() {
     if (renderCache?.masterStatus === 'ready') {
       const item = renderCache.items?.find((cacheItem) => cacheItem.kind === 'master' && cacheItem.status === 'ready' && cacheItem.fileUrl);
       if (item) {
-        await loadAudioUrl(item.fileUrl, item.fileName);
+        if (item.fileUrl.startsWith('http://') || item.fileUrl.startsWith('https://')) {
+          await loadRemoteAudioAsBlob(item.fileUrl, item.fileName);
+        } else {
+          await loadAudioUrl(item.fileUrl, item.fileName);
+        }
         return;
       }
     }
@@ -250,6 +279,7 @@ export function BackingInspector() {
 
     const url = URL.createObjectURL(file);
     objectUrlRef.current = url;
+    audio.crossOrigin = '';
     audio.src = url;
     audio.volume = snapshot.volume;
     audio.playbackRate = snapshot.rate;
