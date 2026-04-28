@@ -1,83 +1,299 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { InspectorSection } from '../shared/InspectorSection';
-import { SelectField } from '../shared/SelectField';
-import { NumberField } from '../shared/NumberField';
-import { SliderField } from '../shared/SliderField';
-import { ToggleField } from '../shared/ToggleField';
-import { Wand2, Music, Download } from 'lucide-react';
+import { Download, Music, Pause, Play, Square, Upload, Volume2 } from 'lucide-react';
 
-// Phase 5 — FeatureGated in RightInspector.
+type PlayerState = 'empty' | 'loading' | 'ready' | 'playing' | 'paused' | 'stopped' | 'error';
+
+interface PlayerSnapshot {
+  state: PlayerState;
+  fileName: string;
+  duration: number;
+  currentTime: number;
+  volume: number;
+  error: string;
+}
+
+function formatTime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return '00:00';
+  const total = Math.floor(seconds);
+  const min = Math.floor(total / 60);
+  const sec = total % 60;
+  return `${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+}
+
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  if (value < 0) return 0;
+  if (value > 1) return 1;
+  return value;
+}
+
+function isSupportedAudioFile(file: File): boolean {
+  const lower = file.name.toLowerCase();
+  return lower.endsWith('.mp3') || lower.endsWith('.wav') || lower.endsWith('.ogg') || lower.endsWith('.m4a') || lower.endsWith('.aac') || lower.endsWith('.flac');
+}
 
 export function BackingInspector() {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const contextRef = useRef<AudioContext | null>(null);
+  const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const gainRef = useRef<GainNode | null>(null);
+  const compressorRef = useRef<DynamicsCompressorNode | null>(null);
+  const objectUrlRef = useRef<string>('');
+  const timerRef = useRef<number | null>(null);
+
+  const [snapshot, setSnapshot] = useState<PlayerSnapshot>({
+    state: 'empty',
+    fileName: '',
+    duration: 0,
+    currentTime: 0,
+    volume: 0.92,
+    error: '',
+  });
+
+  const progress = useMemo(() => {
+    if (snapshot.duration <= 0) return 0;
+    return Math.max(0, Math.min(100, (snapshot.currentTime / snapshot.duration) * 100));
+  }, [snapshot.currentTime, snapshot.duration]);
+
+  const patch = (next: Partial<PlayerSnapshot>) => {
+    setSnapshot((prev) => ({ ...prev, ...next }));
+  };
+
+  const stopTimer = () => {
+    if (timerRef.current !== null) {
+      window.clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  const startTimer = () => {
+    stopTimer();
+    timerRef.current = window.setInterval(() => {
+      const audio = audioRef.current;
+      if (!audio) return;
+      patch({ currentTime: audio.currentTime || 0, duration: audio.duration || 0 });
+    }, 100);
+  };
+
+  const ensureAudio = () => {
+    if (audioRef.current) return audioRef.current;
+
+    const audio = new Audio();
+    audio.preload = 'auto';
+    audio.addEventListener('loadedmetadata', () => patch({ duration: audio.duration || 0, currentTime: 0 }));
+    audio.addEventListener('canplaythrough', () => patch({ state: 'ready', duration: audio.duration || 0 }));
+    audio.addEventListener('play', () => { patch({ state: 'playing' }); startTimer(); });
+    audio.addEventListener('pause', () => { if (!audio.ended) patch({ state: 'paused' }); stopTimer(); });
+    audio.addEventListener('ended', () => { stopTimer(); audio.currentTime = 0; patch({ state: 'stopped', currentTime: 0 }); });
+    audio.addEventListener('error', () => patch({ state: 'error', error: 'Audio file could not be decoded by this browser.' }));
+    audioRef.current = audio;
+    return audio;
+  };
+
+  const ensureGraph = async () => {
+    const audio = ensureAudio();
+    if (contextRef.current && sourceRef.current && gainRef.current && compressorRef.current) return;
+
+    const factory = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!factory) throw new Error('WebAudio is not available in this browser.');
+
+    const context = new factory({ latencyHint: 'playback' });
+    const source = context.createMediaElementSource(audio);
+    const gain = context.createGain();
+    const compressor = context.createDynamicsCompressor();
+
+    gain.gain.value = snapshot.volume;
+    compressor.threshold.value = -18;
+    compressor.knee.value = 24;
+    compressor.ratio.value = 3;
+    compressor.attack.value = 0.003;
+    compressor.release.value = 0.25;
+
+    source.connect(gain);
+    gain.connect(compressor);
+    compressor.connect(context.destination);
+
+    contextRef.current = context;
+    sourceRef.current = source;
+    gainRef.current = gain;
+    compressorRef.current = compressor;
+  };
+
+  const releaseObjectUrl = () => {
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = '';
+    }
+  };
+
+  const openFile = async (file: File) => {
+    if (!isSupportedAudioFile(file)) {
+      patch({ state: 'error', error: 'Use MP3, WAV, OGG, M4A, AAC, or FLAC for performance playback.' });
+      return;
+    }
+
+    const audio = ensureAudio();
+    audio.pause();
+    releaseObjectUrl();
+    stopTimer();
+
+    const url = URL.createObjectURL(file);
+    objectUrlRef.current = url;
+    audio.src = url;
+    audio.volume = snapshot.volume;
+    audio.load();
+
+    patch({ state: 'loading', fileName: file.name, currentTime: 0, duration: 0, error: '' });
+
+    try {
+      await ensureGraph();
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Failed to initialize WebAudio graph.';
+      patch({ state: 'error', error: message });
+    }
+  };
+
+  const playPause = async () => {
+    const audio = ensureAudio();
+    if (!audio.src) return;
+
+    if (snapshot.state === 'playing') {
+      audio.pause();
+      return;
+    }
+
+    try {
+      await ensureGraph();
+      if (contextRef.current?.state === 'suspended') await contextRef.current.resume();
+      await audio.play();
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Playback failed.';
+      patch({ state: 'error', error: message });
+    }
+  };
+
+  const stop = () => {
+    const audio = ensureAudio();
+    audio.pause();
+    audio.currentTime = 0;
+    stopTimer();
+    patch({ state: 'stopped', currentTime: 0 });
+  };
+
+  const seekPercent = (percent: number) => {
+    const audio = ensureAudio();
+    if (!Number.isFinite(audio.duration) || audio.duration <= 0) return;
+    const next = Math.max(0, Math.min(100, percent));
+    audio.currentTime = (next / 100) * audio.duration;
+    patch({ currentTime: audio.currentTime });
+  };
+
+  const setVolume = (percent: number) => {
+    const volume = clamp01(percent / 100);
+    const audio = ensureAudio();
+    audio.volume = volume;
+    if (gainRef.current) gainRef.current.gain.value = volume;
+    patch({ volume });
+  };
+
+  useEffect(() => {
+    return () => {
+      stopTimer();
+      releaseObjectUrl();
+      audioRef.current?.pause();
+      if (audioRef.current) audioRef.current.src = '';
+      contextRef.current?.close();
+    };
+  }, []);
+
   return (
     <div>
-      <InspectorSection title="AI Band Generator" icon={<Wand2 size={12} />}>
-        <SelectField
-          label="Key"
-          value="C"
-          options={['C','D','E','F','G','A','B'].map((k) => ({ value: k, label: k }))}
-          onChange={() => {}}
-        />
-        <SelectField
-          label="Style"
-          value="rock"
-          options={[
-            { value: 'rock', label: 'Rock' },
-            { value: 'blues', label: 'Blues' },
-            { value: 'jazz', label: 'Jazz' },
-            { value: 'pop', label: 'Pop' },
-            { value: 'funk', label: 'Funk' },
-            { value: 'latin', label: 'Latin' },
-            { value: 'country', label: 'Country' },
-            { value: 'metal', label: 'Metal' },
-          ]}
-          onChange={() => {}}
-        />
-        <SelectField
-          label="Difficulty"
-          value="intermediate"
-          options={[
-            { value: 'simple', label: 'Simple' },
-            { value: 'intermediate', label: 'Intermediate' },
-            { value: 'complex', label: 'Complex' },
-          ]}
-          onChange={() => {}}
-        />
-        <NumberField label="Measures" value={16} min={4} max={128} onChange={() => {}} />
-        <SliderField label="Humanize" value={30} min={0} max={100} unit="%" onChange={() => {}} />
-        <SliderField label="Swing" value={0} min={0} max={100} unit="%" onChange={() => {}} />
-        <button className="w-full mt-2 h-8 rounded bg-blue-600 hover:bg-blue-500 text-white text-[12px] font-medium transition-colors">
-          Generate Band
+      <InspectorSection title="Performance Playback" icon={<Music size={12} />}>
+        <button
+          onClick={() => inputRef.current?.click()}
+          className="w-full h-9 rounded bg-blue-600 hover:bg-blue-500 text-white text-[12px] font-medium transition-colors flex items-center justify-center gap-2"
+        >
+          <Upload size={14} /> Import MP3 / WAV / MR
         </button>
+        <input
+          ref={inputRef}
+          type="file"
+          className="hidden"
+          accept=".mp3,.wav,.ogg,.m4a,.aac,.flac,audio/*"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) void openFile(file);
+            if (inputRef.current) inputRef.current.value = '';
+          }}
+        />
+
+        <div className="mt-3 rounded-lg bg-slate-900 border border-slate-700 p-3">
+          <div className="text-[11px] text-slate-500 mb-1">Loaded Audio</div>
+          <div className="text-xs text-slate-200 truncate">{snapshot.fileName || 'No performance audio loaded'}</div>
+          <div className="mt-1 text-[11px] text-slate-500">State: {snapshot.state}</div>
+        </div>
+
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            onClick={() => void playPause()}
+            disabled={!snapshot.fileName}
+            className="h-8 flex-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-100 text-xs flex items-center justify-center gap-1.5"
+          >
+            {snapshot.state === 'playing' ? <Pause size={13} /> : <Play size={13} />}
+            {snapshot.state === 'playing' ? 'Pause' : 'Play'}
+          </button>
+          <button
+            onClick={stop}
+            disabled={!snapshot.fileName}
+            className="h-8 px-3 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-100 text-xs"
+          >
+            <Square size={13} />
+          </button>
+        </div>
+
+        <div className="mt-3">
+          <div className="flex justify-between text-[11px] text-slate-500 mb-1">
+            <span>{formatTime(snapshot.currentTime)}</span>
+            <span>{formatTime(snapshot.duration)}</span>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={progress}
+            onChange={(e) => seekPercent(Number(e.target.value))}
+            className="w-full"
+          />
+        </div>
+
+        <div className="mt-3">
+          <div className="flex justify-between text-[11px] text-slate-500 mb-1">
+            <span className="flex items-center gap-1"><Volume2 size={12} /> Master</span>
+            <span>{Math.round(snapshot.volume * 100)}%</span>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={Math.round(snapshot.volume * 100)}
+            onChange={(e) => setVolume(Number(e.target.value))}
+            className="w-full"
+          />
+        </div>
+
+        {snapshot.error && (
+          <div className="mt-3 rounded border border-red-500/40 bg-red-950/40 px-2 py-2 text-[11px] text-red-100">
+            {snapshot.error}
+          </div>
+        )}
       </InspectorSection>
 
-      <InspectorSection title="Playback" icon={<Music size={12} />} defaultOpen={false}>
-        <NumberField label="BPM Override" value={120} min={20} max={300} onChange={() => {}} />
-        <SelectField
-          label="Key Change"
-          value="original"
-          options={[
-            { value: 'original', label: 'Original' },
-            ...['C','D','E','F','G','A','B'].map((k) => ({ value: k, label: k })),
-          ]}
-          onChange={() => {}}
-        />
-      </InspectorSection>
-
-      <InspectorSection title="Export" icon={<Download size={12} />} defaultOpen={false}>
-        <SelectField
-          label="Format"
-          value="midi"
-          options={[
-            { value: 'midi', label: 'MIDI (.mid)' },
-            { value: 'wav', label: 'WAV Audio' },
-            { value: 'mp3', label: 'MP3 Audio' },
-            { value: 'gp', label: 'Guitar Pro (.gp)' },
-          ]}
-          onChange={() => {}}
-        />
-        <button className="w-full mt-2 h-8 rounded bg-slate-700 hover:bg-slate-600 text-slate-300 text-[12px] font-medium transition-colors">
-          Export Backing Track
-        </button>
+      <InspectorSection title="Canonical Playback Model" icon={<Download size={12} />} defaultOpen={false}>
+        <div className="px-3 pb-3 text-[11px] text-slate-400 leading-relaxed">
+          Score playback is for preview. Performance quality comes from rendered audio: MR, WAV, MP3, stems, or future AI-generated audio. This panel is the canonical path for stage-quality playback.
+        </div>
       </InspectorSection>
     </div>
   );
