@@ -1,5 +1,6 @@
 import { useEditorStore } from '@/stores/editorStore';
 import { useProjectStore } from '@/stores/projectStore';
+import { engine } from '@/core/AlphaTabEngine';
 import { InspectorSection } from '../shared/InspectorSection';
 import { TextField } from '../shared/TextField';
 import { SliderField } from '../shared/SliderField';
@@ -57,6 +58,11 @@ export function TrackInspector() {
 
   const set = (patch: Record<string, unknown>) => updateTrack(idx, patch);
 
+  const setInstrument = (instrument: string) => {
+    set({ instrument });
+    engine.setTrackInstrument(idx, instrument);
+  };
+
   return (
     <div>
       {/* Identity */}
@@ -71,7 +77,7 @@ export function TrackInspector() {
           label="Instrument"
           value={track.instrument}
           options={INSTRUMENT_OPTIONS}
-          onChange={(v) => set({ instrument: v })}
+          onChange={setInstrument}
         />
         <SelectField
           label="Clef"
