@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { useArrangerStore } from './arrangerStore';
 import { useProjectStore } from './projectStore';
+import { useTransportStore } from './transportStore';
 import { renderMockMaestroSound } from '../services/sound/MockMaestroSoundEngine';
 import { checkLocalSoundServer, renderWithLocalSoundServer } from '../services/sound/LocalMaestroSoundEngine';
 import type { MaestroSoundEngineKind, MaestroSoundJobStatus, MaestroSoundRenderResult } from '../services/sound/MaestroSoundEngineTypes';
@@ -20,6 +21,16 @@ interface SoundEngineState {
 
 function shouldUseLocalServer(engine: MaestroSoundEngineKind): boolean {
   return engine === 'performance_pack' || engine === 'ace_step' || engine === 'local_ai' || engine === 'external_runtime';
+}
+
+function getRenderDurationSeconds(): number {
+  const position = useTransportStore.getState().position;
+  const endTimeMs = Number(position.endTime || 0);
+  if (Number.isFinite(endTimeMs) && endTimeMs > 1000) {
+    const seconds = Math.ceil(endTimeMs / 1000) + 2;
+    return Math.max(8, Math.min(1800, seconds));
+  }
+  return 16;
 }
 
 export const useSoundEngineStore = create<SoundEngineState>((set, get) => ({
@@ -48,6 +59,7 @@ export const useSoundEngineStore = create<SoundEngineState>((set, get) => ({
     const projectStore = useProjectStore.getState();
     const plan = arranger.currentPlan || arranger.preparePlan();
     const engine = get().engine;
+    const durationSeconds = getRenderDurationSeconds();
 
     set({ status: 'rendering', lastError: '' });
     projectStore.updateProject({
@@ -55,7 +67,7 @@ export const useSoundEngineStore = create<SoundEngineState>((set, get) => ({
         ...projectStore.project.renderCache,
         masterStatus: 'rendering',
         lastRenderEngine: 'external',
-        message: `Generating Maestro Sound with ${engine} engine...`,
+        message: `Generating Maestro Sound with ${engine} engine for ${durationSeconds}s...`,
       },
     });
 
@@ -66,7 +78,7 @@ export const useSoundEngineStore = create<SoundEngineState>((set, get) => ({
         plan,
         engine,
         sampleRate: 44100,
-        durationSeconds: 16,
+        durationSeconds,
       };
 
       const result = shouldUseLocalServer(engine)
