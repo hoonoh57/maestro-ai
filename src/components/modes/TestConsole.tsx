@@ -103,7 +103,7 @@ function runAllTests(): TestResult[] {
 
   test('sound_engine_store', 'Sound engine store exists', 'Maestro Sound', () => {
     const sound = useSoundEngineStore.getState();
-    if (sound.engine !== 'mock') throw new Error(`Expected mock engine, got ${sound.engine}`);
+    if (sound.engine !== 'performance_pack') throw new Error(`Expected performance_pack engine, got ${sound.engine}`);
     if (typeof sound.generateMaestroSound !== 'function') throw new Error('generateMaestroSound missing');
     return `engine=${sound.engine}, status=${sound.status}`;
   });
