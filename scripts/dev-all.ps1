@@ -10,7 +10,8 @@ $venvPython = Join-Path $soundDir '.venv\Scripts\python.exe'
 $pidDir = Join-Path $root '.runtime'
 $soundPidFile = Join-Path $pidDir 'sound-server.pid'
 $acePidFile = Join-Path $pidDir 'ace-step.pid'
-$soundLog = Join-Path $pidDir 'sound-server.log'
+$soundOutLog = Join-Path $pidDir 'sound-server.out.log'
+$soundErrLog = Join-Path $pidDir 'sound-server.err.log'
 
 function Write-Step([string]$message) {
     Write-Host "[maestro-dev] $message" -ForegroundColor Cyan
@@ -80,14 +81,17 @@ function Start-SoundServer() {
         -ArgumentList 'app.py' `
         -WorkingDirectory $soundDir `
         -WindowStyle $windowStyle `
-        -RedirectStandardOutput $soundLog `
-        -RedirectStandardError $soundLog `
+        -RedirectStandardOutput $soundOutLog `
+        -RedirectStandardError $soundErrLog `
         -PassThru
     Set-Content -Path $soundPidFile -Value $process.Id -Encoding ascii
 
     if (-not (Wait-Port 8765 20)) {
-        Write-Host "Sound server failed to start. Log: $soundLog" -ForegroundColor Red
-        if (Test-Path $soundLog) { Get-Content $soundLog -Tail 40 }
+        Write-Host "Sound server failed to start." -ForegroundColor Red
+        Write-Host "stdout: $soundOutLog" -ForegroundColor Yellow
+        Write-Host "stderr: $soundErrLog" -ForegroundColor Yellow
+        if (Test-Path $soundOutLog) { Get-Content $soundOutLog -Tail 30 }
+        if (Test-Path $soundErrLog) { Get-Content $soundErrLog -Tail 60 }
         throw 'Sound server startup failed.'
     }
     Write-Step 'Sound server ready.'
