@@ -31,6 +31,25 @@ function normalizeForMatch(value: string): string {
     .replace(/[^\p{L}\p{N}]+/gu, '');
 }
 
+interface SoundJobItem {
+  fileName: string;
+  fileUrl: string;
+  metadataFileName?: string | null;
+  jobId: string;
+  engine: string;
+  projectId: string;
+  projectName: string;
+  sourceTitle: string;
+  sourceArtist: string;
+  bpm: number;
+  key: string;
+  durationSeconds: number;
+  sampleRate: number;
+  createdAt: string;
+  message: string;
+  hasMetadata: boolean;
+}
+
 type BuskingPlayerState = 'empty' | 'loading' | 'ready' | 'playing' | 'paused' | 'stopped' | 'error';
 
 export function BuskingWorkflowPanel() {
@@ -50,23 +69,45 @@ export function BuskingWorkflowPanel() {
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [error, setError] = useState('');
-  const [generatedFiles, setGeneratedFiles] = useState<string[]>([]);
+  const [generatedJobs, setGeneratedJobs] = useState<SoundJobItem[]>([]);
   const [isRefreshingFiles, setIsRefreshingFiles] = useState(false);
 
   const masterItem = useMemo(() => {
     return project.renderCache?.items?.find((item) => item.kind === 'master' && item.status === 'ready' && item.fileUrl) || null;
   }, [project.renderCache]);
 
+  const scoreMatchKey = useMemo(() => normalizeForMatch(project.name || currentPlan?.title || ''), [project.name, currentPlan?.title]);
+
+  const matchedJobs = useMemo(() => {
+    if (!scoreMatchKey) return [];
+    return generatedJobs.filter((job) => {
+      const titleKey = normalizeForMatch(job.projectName || job.sourceTitle || job.fileName);
+      const fileKey = normalizeForMatch(job.fileName);
+      return titleKey.includes(scoreMatchKey) || scoreMatchKey.includes(titleKey) || fileKey.includes(scoreMatchKey);
+    });
+  }, [generatedJobs, scoreMatchKey]);
+
+  const otherJobs = useMemo(() => {
+    const matched = new Set(matchedJobs.map((job) => job.fileName));
+    return generatedJobs.filter((job) => !matched.has(job.fileName));
+  }, [generatedJobs, matchedJobs]);
+
   const progress = duration > 0 ? Math.max(0, Math.min(100, (currentTime / duration) * 100)) : 0;
+
+  const selectedJob = useMemo(() => generatedJobs.find((job) => job.fileName === fileName) || null, [generatedJobs, fileName]);
 
   const mismatchWarning = useMemo(() => {
     if (!fileName) return '';
-    const scoreName = normalizeForMatch(project.name || '');
+    if (selectedJob?.hasMetadata) {
+      const jobKey = normalizeForMatch(selectedJob.projectName || selectedJob.sourceTitle || selectedJob.fileName);
+      if (scoreMatchKey && jobKey && (jobKey.includes(scoreMatchKey) || scoreMatchKey.includes(jobKey))) return '';
+      return `Audio/Score mismatch: loaded score is "${project.name}", but selected audio belongs to "${selectedJob.projectName || selectedJob.sourceTitle || selectedJob.fileName}".`;
+    }
     const audioName = normalizeForMatch(fileName);
-    if (!scoreName || !audioName) return '';
-    if (audioName.includes(scoreName) || scoreName.includes(audioName)) return '';
+    if (!scoreMatchKey || !audioName) return '';
+    if (audioName.includes(scoreMatchKey) || scoreMatchKey.includes(audioName)) return '';
     return `Audio/Score mismatch: loaded score is "${project.name}", but selected audio is "${fileName}". Load the matching GP score for accurate busking sync.`;
-  }, [fileName, project.name]);
+  }, [fileName, project.name, scoreMatchKey, selectedJob]);
 
   const stopSyncTimer = () => {
     if (timerRef.current !== null) {
@@ -162,7 +203,8 @@ export function BuskingWorkflowPanel() {
     setFileName(name);
     setError('Loading rendered performance audio...');
     try {
-      const response = await fetch(`${url}${url.includes('?') ? '&' : '?'}v=${Date.now()}`);
+      const absoluteUrl = url.startsWith('http') ? url : `${getSoundServerUrl()}${url}`;
+      const response = await fetch(`${absoluteUrl}${absoluteUrl.includes('?') ? '&' : '?'}v=${Date.now()}`);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const blob = await response.blob();
       if (blob.size <= 44) throw new Error('Downloaded audio blob is empty.');
@@ -184,7 +226,7 @@ export function BuskingWorkflowPanel() {
       return false;
     }
     const url = masterItem.fileUrl;
-    if (url.startsWith('http://') || url.startsWith('https://')) {
+    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/outputs/')) {
       return await loadRemoteAsBlob(url, masterItem.fileName);
     }
     return await loadUrl(url, masterItem.fileName);
@@ -195,13 +237,31 @@ export function BuskingWorkflowPanel() {
     try {
       const response = await fetch(`${getSoundServerUrl()}/api/sound/jobs?v=${Date.now()}`);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const payload = await response.json() as { files?: string[] };
-      const files = (payload.files || [])
-        .filter((name) => name.toLowerCase().endsWith('.wav'))
-        .sort()
-        .reverse();
-      setGeneratedFiles(files);
-      if (files.length > 0) setError('');
+      const payload = await response.json() as { files?: string[]; items?: SoundJobItem[] };
+      if (payload.items && payload.items.length > 0) {
+        setGeneratedJobs(payload.items);
+      } else {
+        const fallbackJobs = (payload.files || []).filter((name) => name.toLowerCase().endsWith('.wav')).sort().reverse().map((name) => ({
+          fileName: name,
+          fileUrl: `/outputs/${name}`,
+          metadataFileName: null,
+          jobId: name,
+          engine: 'unknown',
+          projectId: '',
+          projectName: '',
+          sourceTitle: '',
+          sourceArtist: '',
+          bpm: 0,
+          key: '',
+          durationSeconds: 0,
+          sampleRate: 0,
+          createdAt: '',
+          message: '',
+          hasMetadata: false,
+        }));
+        setGeneratedJobs(fallbackJobs);
+      }
+      setError('');
     } catch (e) {
       setError(e instanceof Error ? `Generated list failed: ${e.message}` : 'Generated list failed.');
     } finally {
@@ -221,15 +281,14 @@ export function BuskingWorkflowPanel() {
     }
   };
 
-  const loadGeneratedFile = async (name: string, autoPlay: boolean = true) => {
-    const ok = await loadRemoteAsBlob(generatedFileUrl(name), name);
+  const loadGeneratedJob = async (job: SoundJobItem, autoPlay: boolean = true) => {
+    const ok = await loadRemoteAsBlob(job.fileUrl || generatedFileUrl(job.fileName), job.fileName);
     if (ok && autoPlay) await playLoadedAudio();
   };
 
   const loadLatestGeneratedFile = async (): Promise<boolean> => {
-    if (generatedFiles.length > 0) {
-      return await loadRemoteAsBlob(generatedFileUrl(generatedFiles[0]), generatedFiles[0]);
-    }
+    const candidate = matchedJobs[0] || generatedJobs[0];
+    if (candidate) return await loadRemoteAsBlob(candidate.fileUrl || generatedFileUrl(candidate.fileName), candidate.fileName);
     setState('error');
     setError('No generated WAV files found. Refresh the generated masters list or generate Performance Sound first.');
     return false;
@@ -290,6 +349,16 @@ export function BuskingWorkflowPanel() {
       if (audioRef.current) audioRef.current.src = '';
     };
   }, []);
+
+  const renderJobButton = (job: SoundJobItem, isMatched: boolean) => (
+    <button key={job.fileName} onClick={() => void loadGeneratedJob(job, true)} className={`w-full text-left rounded border p-2 text-xs transition-colors ${fileName === job.fileName ? 'bg-blue-950/70 border-blue-600 text-blue-100' : isMatched ? 'bg-emerald-950/40 border-emerald-700/50 text-emerald-50 hover:bg-emerald-900/50' : 'bg-slate-900/90 border-slate-800 text-slate-300 hover:bg-slate-800'}`}>
+      <div className="truncate font-medium">{job.projectName || job.sourceTitle || job.fileName}</div>
+      <div className="truncate text-[10px] text-slate-500 mt-0.5">{job.fileName}</div>
+      <div className="text-[10px] text-slate-500 mt-0.5">
+        {job.hasMetadata ? `${job.engine} · ${job.key || '-'} · ${job.bpm || '-'} BPM · ${job.durationSeconds ? formatTime(job.durationSeconds) : '--:--'}` : 'Legacy WAV · no metadata'}
+      </div>
+    </button>
+  );
 
   if (!currentPlan) {
     return (
@@ -352,14 +421,12 @@ export function BuskingWorkflowPanel() {
             <div className="flex items-center gap-2 text-sm font-semibold text-white"><Music size={15} /> Generated Masters</div>
             <button onClick={() => void refreshGeneratedFiles()} className="h-7 px-2 rounded bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-200 flex items-center gap-1"><RefreshCw size={12} className={isRefreshingFiles ? 'animate-spin' : ''} /> Refresh</button>
           </div>
-          <div className="space-y-1 max-h-44 overflow-auto pr-1">
-            {generatedFiles.length === 0 && <div className="rounded bg-slate-900/90 border border-slate-800 p-3 text-xs text-slate-500">No generated WAV files found yet.</div>}
-            {generatedFiles.map((name) => (
-              <button key={name} onClick={() => void loadGeneratedFile(name, true)} className={`w-full text-left rounded border p-2 text-xs transition-colors ${fileName === name ? 'bg-blue-950/70 border-blue-600 text-blue-100' : 'bg-slate-900/90 border-slate-800 text-slate-300 hover:bg-slate-800'}`}>
-                <div className="truncate font-medium">{name}</div>
-                <div className="text-[10px] text-slate-500 mt-0.5">Click to load and play</div>
-              </button>
-            ))}
+          <div className="space-y-1 max-h-64 overflow-auto pr-1">
+            {generatedJobs.length === 0 && <div className="rounded bg-slate-900/90 border border-slate-800 p-3 text-xs text-slate-500">No generated WAV files found yet.</div>}
+            {matchedJobs.length > 0 && <div className="text-[10px] uppercase tracking-wider text-emerald-400 mt-1 mb-1">Matching current score</div>}
+            {matchedJobs.map((job) => renderJobButton(job, true))}
+            {otherJobs.length > 0 && <div className="text-[10px] uppercase tracking-wider text-slate-500 mt-3 mb-1">Other generated masters</div>}
+            {otherJobs.map((job) => renderJobButton(job, false))}
           </div>
         </section>
 
