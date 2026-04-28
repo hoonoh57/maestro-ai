@@ -30,6 +30,25 @@ function Test-Port([int]$port) {
     }
 }
 
+function Get-PortPid([int]$port) {
+    $lines = netstat -ano -p tcp | Select-String ":$port"
+    foreach ($line in $lines) {
+        $text = $line.ToString().Trim()
+        if ($text -match "LISTENING\s+(\d+)$") {
+            return [int]$Matches[1]
+        }
+    }
+    return 0
+}
+
+function Stop-PortProcess([int]$port, [string]$name) {
+    $pidValue = Get-PortPid $port
+    if ($pidValue -le 0) { return }
+    Write-Step "Stopping stale $name on port $port, PID=$pidValue..."
+    Stop-Process -Id $pidValue -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 600
+}
+
 function Wait-Port([int]$port, [int]$timeoutSeconds) {
     $deadline = (Get-Date).AddSeconds($timeoutSeconds)
     while ((Get-Date) -lt $deadline) {
@@ -43,6 +62,24 @@ function Ensure-PidDir() {
     if (-not (Test-Path $pidDir)) {
         New-Item -ItemType Directory -Force -Path $pidDir | Out-Null
     }
+}
+
+function Get-SoundServerHealth() {
+    try {
+        return Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/sound/health' -TimeoutSec 2
+    } catch {
+        return $null
+    }
+}
+
+function Is-SoundServerCurrent() {
+    $health = Get-SoundServerHealth
+    if ($null -eq $health) { return $false }
+    $enginesText = ($health.engines -join ',')
+    if ($health.version -ne '0.3.0') { return $false }
+    if ($health.defaultEngine -ne 'performance_pack') { return $false }
+    if (-not $enginesText.Contains('performance_pack')) { return $false }
+    return $true
 }
 
 function Ensure-SoundServerVenv() {
@@ -69,8 +106,12 @@ function Ensure-SoundServerVenv() {
 
 function Start-SoundServer() {
     if (Test-Port 8765) {
-        Write-Step 'Sound server already running on 127.0.0.1:8765.'
-        return
+        if (Is-SoundServerCurrent) {
+            Write-Step 'Sound server 0.3.0 already running on 127.0.0.1:8765.'
+            return
+        }
+        Write-Step 'Old or incompatible sound server detected on 127.0.0.1:8765.'
+        Stop-PortProcess 8765 'MaestroAI Sound Server'
     }
 
     Ensure-SoundServerVenv
@@ -94,7 +135,12 @@ function Start-SoundServer() {
         if (Test-Path $soundErrLog) { Get-Content $soundErrLog -Tail 60 }
         throw 'Sound server startup failed.'
     }
-    Write-Step 'Sound server ready.'
+    if (-not (Is-SoundServerCurrent)) {
+        Write-Host "Sound server started but contract is not current." -ForegroundColor Red
+        if (Test-Path $soundErrLog) { Get-Content $soundErrLog -Tail 80 }
+        throw 'Sound server contract mismatch.'
+    }
+    Write-Step 'Sound server ready: 0.3.0 / performance_pack.'
 }
 
 function Start-AceStepIfConfigured() {
