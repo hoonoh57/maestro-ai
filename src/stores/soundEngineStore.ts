@@ -18,8 +18,12 @@ interface SoundEngineState {
   clearGeneratedSound: () => void;
 }
 
+function shouldUseLocalServer(engine: MaestroSoundEngineKind): boolean {
+  return engine === 'ace_step' || engine === 'local_ai' || engine === 'external_runtime';
+}
+
 export const useSoundEngineStore = create<SoundEngineState>((set, get) => ({
-  engine: 'mock',
+  engine: 'ace_step',
   status: 'idle',
   lastResult: null,
   lastHealth: null,
@@ -65,7 +69,7 @@ export const useSoundEngineStore = create<SoundEngineState>((set, get) => ({
         durationSeconds: 10,
       };
 
-      const result = engine === 'local_ai' || engine === 'external_runtime'
+      const result = shouldUseLocalServer(engine)
         ? await renderWithLocalSoundServer(request)
         : await renderMockMaestroSound(request);
 
