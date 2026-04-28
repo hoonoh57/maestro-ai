@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { InspectorSection } from '../shared/InspectorSection';
-import { Download, Music, Pause, Play, Square, Upload, Volume2 } from 'lucide-react';
+import { Download, Music, Pause, Play, Repeat, Square, Upload, Volume2 } from 'lucide-react';
 
 type PlayerState = 'empty' | 'loading' | 'ready' | 'playing' | 'paused' | 'stopped' | 'error';
 
@@ -10,6 +10,10 @@ interface PlayerSnapshot {
   duration: number;
   currentTime: number;
   volume: number;
+  rate: number;
+  loopEnabled: boolean;
+  loopStart: number;
+  loopEnd: number;
   error: string;
 }
 
@@ -26,6 +30,13 @@ function clamp01(value: number): number {
   if (value < 0) return 0;
   if (value > 1) return 1;
   return value;
+}
+
+function clampRate(value: number): number {
+  if (!Number.isFinite(value)) return 1;
+  if (value < 0.5) return 0.5;
+  if (value > 1.25) return 1.25;
+  return Math.round(value * 100) / 100;
 }
 
 function isSupportedAudioFile(file: File): boolean {
@@ -49,6 +60,10 @@ export function BackingInspector() {
     duration: 0,
     currentTime: 0,
     volume: 0.92,
+    rate: 1,
+    loopEnabled: false,
+    loopStart: 0,
+    loopEnd: 0,
     error: '',
   });
 
@@ -56,6 +71,16 @@ export function BackingInspector() {
     if (snapshot.duration <= 0) return 0;
     return Math.max(0, Math.min(100, (snapshot.currentTime / snapshot.duration) * 100));
   }, [snapshot.currentTime, snapshot.duration]);
+
+  const loopStartPct = useMemo(() => {
+    if (snapshot.duration <= 0) return 0;
+    return Math.max(0, Math.min(100, (snapshot.loopStart / snapshot.duration) * 100));
+  }, [snapshot.loopStart, snapshot.duration]);
+
+  const loopEndPct = useMemo(() => {
+    if (snapshot.duration <= 0) return 0;
+    return Math.max(0, Math.min(100, (snapshot.loopEnd / snapshot.duration) * 100));
+  }, [snapshot.loopEnd, snapshot.duration]);
 
   const patch = (next: Partial<PlayerSnapshot>) => {
     setSnapshot((prev) => ({ ...prev, ...next }));
@@ -73,8 +98,17 @@ export function BackingInspector() {
     timerRef.current = window.setInterval(() => {
       const audio = audioRef.current;
       if (!audio) return;
-      patch({ currentTime: audio.currentTime || 0, duration: audio.duration || 0 });
-    }, 100);
+      const current = audio.currentTime || 0;
+      const duration = audio.duration || 0;
+      setSnapshot((prev) => {
+        const end = prev.loopEnd > prev.loopStart ? prev.loopEnd : duration;
+        if (prev.loopEnabled && end > prev.loopStart && current >= end) {
+          audio.currentTime = prev.loopStart;
+          return { ...prev, currentTime: prev.loopStart, duration };
+        }
+        return { ...prev, currentTime: current, duration };
+      });
+    }, 60);
   };
 
   const ensureAudio = () => {
@@ -82,7 +116,8 @@ export function BackingInspector() {
 
     const audio = new Audio();
     audio.preload = 'auto';
-    audio.addEventListener('loadedmetadata', () => patch({ duration: audio.duration || 0, currentTime: 0 }));
+    audio.preservesPitch = true;
+    audio.addEventListener('loadedmetadata', () => patch({ duration: audio.duration || 0, currentTime: 0, loopStart: 0, loopEnd: audio.duration || 0 }));
     audio.addEventListener('canplaythrough', () => patch({ state: 'ready', duration: audio.duration || 0 }));
     audio.addEventListener('play', () => { patch({ state: 'playing' }); startTimer(); });
     audio.addEventListener('pause', () => { if (!audio.ended) patch({ state: 'paused' }); stopTimer(); });
@@ -143,9 +178,11 @@ export function BackingInspector() {
     objectUrlRef.current = url;
     audio.src = url;
     audio.volume = snapshot.volume;
+    audio.playbackRate = snapshot.rate;
+    audio.preservesPitch = true;
     audio.load();
 
-    patch({ state: 'loading', fileName: file.name, currentTime: 0, duration: 0, error: '' });
+    patch({ state: 'loading', fileName: file.name, currentTime: 0, duration: 0, loopStart: 0, loopEnd: 0, error: '' });
 
     try {
       await ensureGraph();
@@ -196,6 +233,34 @@ export function BackingInspector() {
     audio.volume = volume;
     if (gainRef.current) gainRef.current.gain.value = volume;
     patch({ volume });
+  };
+
+  const setRate = (percent: number) => {
+    const rate = clampRate(percent / 100);
+    const audio = ensureAudio();
+    audio.playbackRate = rate;
+    audio.preservesPitch = true;
+    patch({ rate });
+  };
+
+  const setLoopStartHere = () => {
+    const audio = ensureAudio();
+    const current = audio.currentTime || 0;
+    const end = snapshot.loopEnd > current ? snapshot.loopEnd : snapshot.duration;
+    patch({ loopStart: current, loopEnd: end });
+  };
+
+  const setLoopEndHere = () => {
+    const audio = ensureAudio();
+    const current = audio.currentTime || 0;
+    const start = snapshot.loopStart < current ? snapshot.loopStart : 0;
+    patch({ loopStart: start, loopEnd: current });
+  };
+
+  const toggleLoop = () => {
+    const duration = snapshot.duration || 0;
+    const end = snapshot.loopEnd > snapshot.loopStart ? snapshot.loopEnd : duration;
+    patch({ loopEnabled: !snapshot.loopEnabled, loopStart: snapshot.loopStart, loopEnd: end });
   };
 
   useEffect(() => {
@@ -266,6 +331,10 @@ export function BackingInspector() {
             onChange={(e) => seekPercent(Number(e.target.value))}
             className="w-full"
           />
+          <div className="relative h-2">
+            <div className="absolute top-0 h-2 w-px bg-emerald-400" style={{ left: `${loopStartPct}%` }} />
+            <div className="absolute top-0 h-2 w-px bg-orange-400" style={{ left: `${loopEndPct}%` }} />
+          </div>
         </div>
 
         <div className="mt-3">
@@ -281,6 +350,34 @@ export function BackingInspector() {
             onChange={(e) => setVolume(Number(e.target.value))}
             className="w-full"
           />
+        </div>
+
+        <div className="mt-3">
+          <div className="flex justify-between text-[11px] text-slate-500 mb-1">
+            <span>Speed / Pitch Preserve</span>
+            <span>{Math.round(snapshot.rate * 100)}%</span>
+          </div>
+          <input
+            type="range"
+            min={50}
+            max={125}
+            step={5}
+            value={Math.round(snapshot.rate * 100)}
+            onChange={(e) => setRate(Number(e.target.value))}
+            className="w-full"
+          />
+        </div>
+
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          <button onClick={setLoopStartHere} disabled={!snapshot.fileName} className="h-8 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-[11px] text-slate-100">Set A</button>
+          <button onClick={setLoopEndHere} disabled={!snapshot.fileName} className="h-8 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-[11px] text-slate-100">Set B</button>
+          <button onClick={toggleLoop} disabled={!snapshot.fileName} className={`h-8 rounded text-[11px] flex items-center justify-center gap-1 ${snapshot.loopEnabled ? 'bg-emerald-600 text-white' : 'bg-slate-800 hover:bg-slate-700 text-slate-100 disabled:opacity-40'}`}>
+            <Repeat size={12} /> Loop
+          </button>
+        </div>
+
+        <div className="mt-2 text-[11px] text-slate-500">
+          A {formatTime(snapshot.loopStart)} / B {formatTime(snapshot.loopEnd)}
         </div>
 
         {snapshot.error && (
