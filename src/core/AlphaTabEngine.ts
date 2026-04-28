@@ -115,11 +115,7 @@ export class AlphaTabEngine {
     };
   }
 
-  init(
-    container: HTMLElement,
-    viewport: HTMLElement | null,
-    callbacks: EngineCallbacks,
-  ): boolean {
+  init(container: HTMLElement, viewport: HTMLElement | null, callbacks: EngineCallbacks): boolean {
     this.callbacks = callbacks;
     this.playbackProfile = getPlaybackQualityProfile();
 
@@ -133,10 +129,7 @@ export class AlphaTabEngine {
     }
 
     if (this.api !== null) {
-      if (this.container === container) {
-        console.info('[AlphaTabEngine] Already initialized on same container.');
-        return true;
-      }
+      if (this.container === container) return true;
       this.destroy();
     }
 
@@ -152,10 +145,7 @@ export class AlphaTabEngine {
     const playerSettings = getAlphaTabPlayerSettings(this.playbackProfile, alphaTab);
 
     const settings: any = {
-      core: {
-        fontDirectory: '/font/',
-        includeNoteBounds: true,
-      },
+      core: { fontDirectory: '/font/', includeNoteBounds: true },
       display: {
         layoutMode: 1,
         staveProfile: 0,
@@ -168,13 +158,8 @@ export class AlphaTabEngine {
           scoreInfoColor: '#cbd5e1',
         },
       },
-      player: {
-        ...playerSettings,
-        scrollElement: viewport ?? undefined,
-      },
-      notation: {
-        notationMode: 0,
-      },
+      player: { ...playerSettings, scrollElement: viewport ?? undefined },
+      notation: { notationMode: 0 },
     };
 
     try {
@@ -193,7 +178,6 @@ export class AlphaTabEngine {
 
   private bindEvents(): void {
     if (this.api === null) return;
-
     this.api.scoreLoaded.on((score: alphaTab.model.Score) => {
       this.scoreLoadedCount += 1;
       this.lastScoreLoadTime = Date.now();
@@ -201,19 +185,16 @@ export class AlphaTabEngine {
       this.normalizeScoreMix(score);
       this.callbacks.onScoreLoaded?.(score);
     });
-
     this.api.renderFinished.on(() => {
       this.renderFinishedCount += 1;
       this.refreshContainerSize();
       this.callbacks.onRenderFinished?.();
     });
-
     this.api.playerReady.on(() => {
       this._isPlayerReady = true;
       this.normalizePlaybackDefaults();
       this.callbacks.onPlayerReady?.();
     });
-
     this.api.playerStateChanged.on((e: any) => {
       let state: PlayerState = 'stopped';
       if (e.state === alphaTab.synth.PlayerState.Playing) state = 'playing';
@@ -221,7 +202,6 @@ export class AlphaTabEngine {
       this.currentPlayerState = state;
       this.callbacks.onPlayerStateChanged?.(state);
     });
-
     this.api.playerPositionChanged.on((e: any) => {
       this.callbacks.onPositionChanged?.({
         currentTick: e.currentTick ?? 0,
@@ -230,23 +210,13 @@ export class AlphaTabEngine {
         endTime: e.endTime ?? 0,
       });
     });
-
-    this.api.beatMouseDown.on((beat: alphaTab.model.Beat) => {
-      this.callbacks.onBeatMouseDown?.(beat);
-    });
-
-    this.api.noteMouseDown.on((note: alphaTab.model.Note) => {
-      this.callbacks.onNoteMouseDown?.(note);
-    });
-
+    this.api.beatMouseDown.on((beat: alphaTab.model.Beat) => this.callbacks.onBeatMouseDown?.(beat));
+    this.api.noteMouseDown.on((note: alphaTab.model.Note) => this.callbacks.onNoteMouseDown?.(note));
     this.api.soundFontLoad.on((e: any) => {
       const pct = e.total > 0 ? Math.round((e.loaded / e.total) * 100) : 0;
       this.callbacks.onSoundFontProgress?.(pct);
     });
-
-    this.api.error.on((e: unknown) => {
-      this.reportError(toError(e));
-    });
+    this.api.error.on((e: unknown) => this.reportError(toError(e)));
   }
 
   private refreshContainerSize(): void {
@@ -284,20 +254,15 @@ export class AlphaTabEngine {
 
   private normalizeScoreMix(score: alphaTab.model.Score): void {
     if (this.api === null) return;
-
     for (let i = 0; i < score.tracks.length; i += 1) {
       const track = score.tracks[i];
       const playbackInfo = (track as any).playbackInfo;
       if (!playbackInfo) continue;
-
       const currentVolume = typeof playbackInfo.volume === 'number' ? playbackInfo.volume / 16 : this.playbackProfile.minTrackVolume;
       const nextVolume = normalizeTrackVolume(currentVolume, this.playbackProfile);
       playbackInfo.volume = Math.max(1, Math.min(16, Math.round(nextVolume * 16)));
     }
-
-    try {
-      this.api.changeTrackVolume(score.tracks, this.playbackProfile.masterVolume);
-    } catch {}
+    try { this.api.changeTrackVolume(score.tracks, this.playbackProfile.masterVolume); } catch {}
   }
 
   private clearPendingPlay(): void {
@@ -310,10 +275,7 @@ export class AlphaTabEngine {
   private getPlaybackStabilizationDelay(): number {
     const trackCount = this.score?.tracks?.length ?? this.tracks.length ?? 1;
     const baseDelay = this.playbackProfile.stabilizationBaseDelay;
-    const trackDelay = Math.min(
-      this.playbackProfile.stabilizationMaxTrackDelay,
-      Math.max(0, trackCount - 1) * this.playbackProfile.stabilizationPerTrackDelay,
-    );
+    const trackDelay = Math.min(this.playbackProfile.stabilizationMaxTrackDelay, Math.max(0, trackCount - 1) * this.playbackProfile.stabilizationPerTrackDelay);
     return baseDelay + trackDelay;
   }
 
@@ -369,42 +331,40 @@ export class AlphaTabEngine {
     if (this.api === null || this.score === null) return false;
     const track = this.score.tracks[trackIndex];
     if (!track) return false;
-
     const playbackInfo = (track as any).playbackInfo;
     if (!playbackInfo) return false;
 
     const program = GM_PROGRAM_BY_INSTRUMENT[instrument] ?? 0;
     playbackInfo.program = program;
 
-    if (instrument === 'drums') {
-      playbackInfo.isPercussion = true;
-    } else if (typeof playbackInfo.isPercussion === 'boolean') {
-      playbackInfo.isPercussion = false;
-    }
+    if (instrument === 'drums') playbackInfo.isPercussion = true;
+    else if (typeof playbackInfo.isPercussion === 'boolean') playbackInfo.isPercussion = false;
 
     try {
+      this.clearPendingPlay();
       if (this.currentPlayerState === 'playing') this.api.stop();
+      this._isPlayerReady = false;
+      const apiAny = this.api as any;
+      if (typeof apiAny.loadMidiForScore === 'function') apiAny.loadMidiForScore();
+      else if (typeof apiAny.updateSettings === 'function') apiAny.updateSettings();
       this.api.renderTracks(this.score.tracks);
+      this.normalizePlaybackDefaults();
+      console.info('[AlphaTabEngine] Track instrument changed', { trackIndex, instrument, program });
     } catch (e: unknown) {
       this.reportError(toError(e));
     }
-
     return true;
   }
 
   play(): void { this.safePlay(); }
   pause(): void { this.api?.pause(); }
   playPause(): void { this.safePlayPause(); }
-  stop(): void {
-    this.clearPendingPlay();
-    this.api?.stop();
-  }
+  stop(): void { this.clearPendingPlay(); this.api?.stop(); }
 
   safePlay(): void {
     if (this.api === null) return;
     this.clearPendingPlay();
     this.normalizePlaybackDefaults();
-
     const delay = this.getPlaybackStabilizationDelay();
     this.pendingPlayTimer = window.setTimeout(() => {
       this.pendingPlayTimer = null;
@@ -428,10 +388,7 @@ export class AlphaTabEngine {
     this.safePlay();
   }
 
-  setPlaybackSpeed(speed: number): void {
-    if (this.api !== null && Number.isFinite(speed) && speed > 0) this.api.playbackSpeed = speed;
-  }
-
+  setPlaybackSpeed(speed: number): void { if (this.api !== null && Number.isFinite(speed) && speed > 0) this.api.playbackSpeed = speed; }
   setMasterVolume(vol: number): void { if (this.api !== null) this.api.masterVolume = clamp01(vol); }
   setMetronomeVolume(vol: number): void { if (this.api !== null) this.api.metronomeVolume = clamp01(vol); }
   setCountInVolume(vol: number): void { if (this.api !== null) this.api.countInVolume = clamp01(vol); }
