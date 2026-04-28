@@ -61,30 +61,6 @@ function clamp01(value: number): number {
   return value;
 }
 
-function normalMidiChannelForTrack(trackIndex: number): number {
-  const channel = trackIndex % 15;
-  return channel >= 9 ? channel + 1 : channel;
-}
-
-function secondaryMidiChannel(primaryChannel: number): number {
-  let secondary = (primaryChannel + 1) % 16;
-  if (secondary === 9) secondary = (secondary + 1) % 16;
-  return secondary;
-}
-
-const GM_PROGRAM_BY_INSTRUMENT: Record<string, number> = {
-  acoustic_guitar: 24,
-  electric_guitar: 27,
-  bass: 33,
-  piano: 0,
-  drums: 0,
-  violin: 40,
-  vocals: 52,
-  synth: 80,
-  ukulele: 24,
-  other: 0,
-};
-
 export class AlphaTabEngine {
   private api: alphaTab.AlphaTabApi | null = null;
   private callbacks: EngineCallbacks = {};
@@ -340,39 +316,17 @@ export class AlphaTabEngine {
 
   setTrackInstrument(trackIndex: number, instrument: string): boolean {
     if (this.api === null || this.score === null) return false;
-    const score = this.score;
-    const track = score.tracks[trackIndex];
+    const track = this.score.tracks[trackIndex];
     if (!track) return false;
     const playbackInfo = (track as any).playbackInfo;
     if (!playbackInfo) return false;
 
-    const program = GM_PROGRAM_BY_INSTRUMENT[instrument] ?? 0;
-    const primaryChannel = instrument === 'drums' ? 9 : normalMidiChannelForTrack(trackIndex);
-    const secondaryChannel = instrument === 'drums' ? 9 : secondaryMidiChannel(primaryChannel);
+    console.info('[AlphaTabEngine] Instrument metadata changed. Preview engine keeps original loaded GP playback sound.', {
+      trackIndex,
+      instrument,
+      originalProgram: playbackInfo.program,
+    });
 
-    playbackInfo.program = program;
-    playbackInfo.bank = 0;
-    playbackInfo.port = 0;
-    playbackInfo.primaryChannel = primaryChannel;
-    playbackInfo.secondaryChannel = secondaryChannel;
-    if (instrument === 'drums') playbackInfo.isPercussion = true;
-    else if (typeof playbackInfo.isPercussion === 'boolean') playbackInfo.isPercussion = false;
-
-    try {
-      this.clearPendingPlay();
-      if (this.currentPlayerState === 'playing') this.api.stop();
-      this._isPlayerReady = false;
-      this.api.load(score, score.tracks.map((_t, i) => i));
-      console.info('[AlphaTabEngine] Track instrument remapped and score reloaded', {
-        trackIndex,
-        instrument,
-        program,
-        primaryChannel,
-        secondaryChannel,
-      });
-    } catch (e: unknown) {
-      this.reportError(toError(e));
-    }
     return true;
   }
 
