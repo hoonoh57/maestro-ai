@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type AppMode = 'editor' | 'practice' | 'backing' | 'busking' | 'mixer' | 'test';
+export type AppMode = 'editor' | 'arrange' | 'practice' | 'backing' | 'busking' | 'mixer' | 'test';
 
 interface UIState {
   mode: AppMode;
