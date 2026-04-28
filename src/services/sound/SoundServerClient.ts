@@ -1,4 +1,4 @@
-import type { MaestroSoundRenderRequest, MaestroSoundRenderResult } from './MaestroSoundEngineTypes';
+import type { MaestroSoundEngineKind, MaestroSoundRenderRequest, MaestroSoundRenderResult } from './MaestroSoundEngineTypes';
 
 export interface SoundServerHealth {
   ok: boolean;
@@ -40,6 +40,11 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
   } finally {
     window.clearTimeout(timer);
   }
+}
+
+function toEngineKind(value: string, fallback: MaestroSoundEngineKind): MaestroSoundEngineKind {
+  if (value === 'ace_step' || value === 'mock' || value === 'local_ai' || value === 'cloud_ai' || value === 'external_runtime') return value;
+  return fallback;
 }
 
 export class SoundServerClient {
@@ -92,7 +97,7 @@ export class SoundServerClient {
     return {
       jobId: payload.jobId,
       status: payload.status,
-      engine: request.engine,
+      engine: toEngineKind(payload.engine, request.engine),
       fileName: payload.fileName,
       fileUrl: absoluteUrl,
       mimeType: payload.mimeType,
