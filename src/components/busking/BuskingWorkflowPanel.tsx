@@ -1,18 +1,216 @@
-import React from 'react';
-import { Mic2, MonitorPlay, Music, RefreshCw, Route, Sparkles } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Mic2, MonitorPlay, Music, Pause, Play, RefreshCw, Route, Square, Sparkles } from 'lucide-react';
+import { engine } from '../../core/AlphaTabEngine';
 import { useArrangerStore } from '../../stores/arrangerStore';
 import { useProjectStore } from '../../stores/projectStore';
+import { useTransportStore } from '../../stores/transportStore';
 import { useUIStore } from '../../stores/uiStore';
 
 function formatGoalLabel(value: string): string {
   return value.replace(/_/g, ' ');
 }
 
+function formatTime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return '00:00';
+  const total = Math.floor(seconds);
+  const min = Math.floor(total / 60);
+  const sec = total % 60;
+  return `${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+}
+
+type BuskingPlayerState = 'empty' | 'loading' | 'ready' | 'playing' | 'paused' | 'stopped' | 'error';
+
 export function BuskingWorkflowPanel() {
   const currentPlan = useArrangerStore((s) => s.currentPlan);
   const preparePlan = useArrangerStore((s) => s.preparePlan);
   const project = useProjectStore((s) => s.project);
   const setMode = useUIStore((s) => s.setMode);
+  const transportPosition = useTransportStore((s) => s.position);
+  const setTransportPosition = useTransportStore((s) => s.setPosition);
+  const setPlayerState = useTransportStore((s) => s.setPlayerState);
+
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const objectUrlRef = useRef<string>('');
+  const timerRef = useRef<number | null>(null);
+  const [state, setState] = useState<BuskingPlayerState>('empty');
+  const [fileName, setFileName] = useState('');
+  const [duration, setDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [error, setError] = useState('');
+
+  const masterItem = useMemo(() => {
+    return project.renderCache?.items?.find((item) => item.kind === 'master' && item.status === 'ready' && item.fileUrl) || null;
+  }, [project.renderCache]);
+
+  const progress = duration > 0 ? Math.max(0, Math.min(100, (currentTime / duration) * 100)) : 0;
+
+  const stopSyncTimer = () => {
+    if (timerRef.current !== null) {
+      window.clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  const releaseObjectUrl = () => {
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = '';
+    }
+  };
+
+  const syncScoreToAudio = () => {
+    const player = audioRef.current;
+    if (!player) return;
+    const nextDuration = Number.isFinite(player.duration) && player.duration > 0 ? player.duration : duration;
+    const nextCurrent = Number.isFinite(player.currentTime) ? player.currentTime : 0;
+    const endTick = transportPosition.endTick;
+    let targetTick = 0;
+    if (nextDuration > 0 && endTick > 0) {
+      targetTick = Math.max(0, Math.min(endTick, Math.round((nextCurrent / nextDuration) * endTick)));
+      try { engine.tickPosition = targetTick; } catch {}
+    }
+    setCurrentTime(nextCurrent);
+    setDuration(nextDuration);
+    setTransportPosition({ currentTick: targetTick, endTick, currentTime: nextCurrent * 1000, endTime: nextDuration * 1000 });
+  };
+
+  const startSyncTimer = () => {
+    stopSyncTimer();
+    timerRef.current = window.setInterval(syncScoreToAudio, 80);
+  };
+
+  const ensureAudio = () => {
+    if (audioRef.current) return audioRef.current;
+    const player = new Audio();
+    player.preload = 'auto';
+    player.preservesPitch = true;
+    player.addEventListener('loadedmetadata', () => {
+      const d = Number.isFinite(player.duration) ? player.duration : 0;
+      setDuration(d);
+      setCurrentTime(0);
+      setState('ready');
+      setTransportPosition({ currentTick: 0, endTick: transportPosition.endTick, currentTime: 0, endTime: d * 1000 });
+    });
+    player.addEventListener('play', () => { setState('playing'); setPlayerState('playing'); startSyncTimer(); });
+    player.addEventListener('pause', () => { if (!player.ended) { setState('paused'); setPlayerState('paused'); } stopSyncTimer(); });
+    player.addEventListener('ended', () => {
+      stopSyncTimer();
+      player.currentTime = 0;
+      try { engine.tickPosition = 0; } catch {}
+      setCurrentTime(0);
+      setState('stopped');
+      setPlayerState('stopped');
+      setTransportPosition({ currentTick: 0, endTick: transportPosition.endTick, currentTime: 0, endTime: (player.duration || 0) * 1000 });
+    });
+    player.addEventListener('error', () => { setState('error'); setError('Busking audio could not be decoded.'); });
+    audioRef.current = player;
+    return player;
+  };
+
+  const loadUrl = async (url: string, name: string) => {
+    const player = ensureAudio();
+    player.pause();
+    stopSyncTimer();
+    releaseObjectUrl();
+    player.crossOrigin = url.startsWith('blob:') ? '' : 'anonymous';
+    player.src = url;
+    player.volume = 0.92;
+    player.playbackRate = 1;
+    player.preservesPitch = true;
+    player.load();
+    try { engine.stop(); } catch {}
+    try { engine.tickPosition = 0; } catch {}
+    setFileName(name);
+    setState('loading');
+    setCurrentTime(0);
+    setDuration(0);
+    setError('');
+  };
+
+  const loadMaster = async () => {
+    if (!masterItem) {
+      setState('error');
+      setError('No rendered master found. Use Arrange > Generate Performance Sound first.');
+      return;
+    }
+    const url = masterItem.fileUrl;
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      setState('loading');
+      setFileName(masterItem.fileName);
+      setError('Loading rendered performance audio...');
+      try {
+        const response = await fetch(`${url}${url.includes('?') ? '&' : '?'}v=${Date.now()}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const blob = await response.blob();
+        if (blob.size <= 44) throw new Error('Downloaded audio blob is empty.');
+        const objectUrl = URL.createObjectURL(blob);
+        objectUrlRef.current = objectUrl;
+        await loadUrl(objectUrl, masterItem.fileName);
+      } catch (e) {
+        setState('error');
+        setError(e instanceof Error ? e.message : String(e));
+      }
+      return;
+    }
+    await loadUrl(url, masterItem.fileName);
+  };
+
+  const playPause = async () => {
+    const player = ensureAudio();
+    if (!player.src && masterItem) await loadMaster();
+    const active = ensureAudio();
+    if (!active.src) {
+      setState('error');
+      setError('No busking audio loaded. Generate Performance Sound first.');
+      return;
+    }
+    if (state === 'playing') {
+      active.pause();
+      return;
+    }
+    try {
+      try { engine.stop(); } catch {}
+      await active.play();
+      startSyncTimer();
+    } catch (e) {
+      setState('error');
+      setError(e instanceof Error ? e.message : 'Busking playback failed.');
+    }
+  };
+
+  const stop = () => {
+    const player = ensureAudio();
+    player.pause();
+    player.currentTime = 0;
+    stopSyncTimer();
+    try { engine.tickPosition = 0; } catch {}
+    setCurrentTime(0);
+    setState('stopped');
+    setPlayerState('stopped');
+    setTransportPosition({ currentTick: 0, endTick: transportPosition.endTick, currentTime: 0, endTime: duration * 1000 });
+  };
+
+  const seekPercent = (percent: number) => {
+    const player = ensureAudio();
+    const d = Number.isFinite(player.duration) && player.duration > 0 ? player.duration : duration;
+    if (d <= 0) return;
+    player.currentTime = (Math.max(0, Math.min(100, percent)) / 100) * d;
+    syncScoreToAudio();
+  };
+
+  useEffect(() => {
+    if (masterItem && state === 'empty') void loadMaster();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [masterItem?.id]);
+
+  useEffect(() => {
+    return () => {
+      stopSyncTimer();
+      releaseObjectUrl();
+      audioRef.current?.pause();
+      if (audioRef.current) audioRef.current.src = '';
+    };
+  }, []);
 
   if (!currentPlan) {
     return (
@@ -20,9 +218,7 @@ export function BuskingWorkflowPanel() {
         <div className="max-w-[560px] rounded-2xl bg-slate-900 border border-slate-700 p-8 text-center">
           <Mic2 size={42} className="mx-auto text-blue-400 mb-4" />
           <h2 className="text-xl font-bold text-white mb-2">Busking Set Not Prepared</h2>
-          <p className="text-sm text-slate-500 leading-relaxed mb-5">
-            Prepare a busking version first. Busking mode displays stage cues, arrangement structure, and RenderCache playback status.
-          </p>
+          <p className="text-sm text-slate-500 leading-relaxed mb-5">Prepare a busking version first.</p>
           <div className="flex justify-center gap-2">
             <button onClick={() => setMode('arrange')} className="h-9 px-4 rounded bg-slate-800 hover:bg-slate-700 text-sm text-slate-200">Go to Arrange</button>
             <button onClick={() => preparePlan()} className="h-9 px-4 rounded bg-blue-600 hover:bg-blue-500 text-sm text-white flex items-center gap-2"><RefreshCw size={14} /> Auto Prepare</button>
@@ -33,69 +229,66 @@ export function BuskingWorkflowPanel() {
   }
 
   return (
-    <div className="absolute inset-0 z-20 bg-[#020617] text-slate-200 overflow-auto">
-      <div className="max-w-[1120px] mx-auto px-6 py-6">
-        <div className="rounded-2xl border border-blue-700/40 bg-gradient-to-br from-slate-900 to-blue-950/40 p-6 mb-5">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2 text-blue-300 text-xs font-semibold uppercase tracking-wider mb-2"><MonitorPlay size={15} /> Busking Performance</div>
-              <h1 className="text-3xl font-bold text-white">{project.name || currentPlan.title}</h1>
-              <div className="mt-2 text-slate-400">{currentPlan.recommendedKey} · Capo {currentPlan.capo} · {currentPlan.performanceBpm} BPM · {currentPlan.difficulty}</div>
+    <div className="absolute inset-0 z-20 pointer-events-none">
+      <div className="absolute left-4 right-4 top-4 pointer-events-auto rounded-2xl border border-blue-700/40 bg-slate-950/90 backdrop-blur p-4 shadow-2xl">
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-blue-300 text-xs font-semibold uppercase tracking-wider"><MonitorPlay size={15} /> Busking Sync Playback</div>
+            <div className="mt-1 flex items-center gap-3 min-w-0">
+              <h1 className="text-xl font-bold text-white truncate">{project.name || currentPlan.title}</h1>
+              <span className="text-xs text-slate-400 shrink-0">{currentPlan.recommendedKey} · Capo {currentPlan.capo} · {currentPlan.performanceBpm} BPM · {formatGoalLabel(currentPlan.goal)}</span>
             </div>
-            <button onClick={() => setMode('backing')} className="h-10 px-4 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-medium flex items-center gap-2"><Music size={15} /> Open Performance Playback</button>
+            <div className="mt-1 text-[11px] text-slate-500 truncate">{fileName || 'No rendered performance audio loaded.'}</div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button onClick={() => void loadMaster()} disabled={!masterItem} className="h-9 px-3 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-100 text-xs flex items-center gap-1.5"><Music size={14} /> Load Master</button>
+            <button onClick={() => void playPause()} className="h-10 px-5 rounded bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold flex items-center gap-2">{state === 'playing' ? <Pause size={15} /> : <Play size={15} />}{state === 'playing' ? 'Pause' : 'Play'}</button>
+            <button onClick={stop} className="h-10 px-3 rounded bg-slate-800 hover:bg-slate-700 text-slate-100"><Square size={15} /></button>
+            <button onClick={() => setMode('backing')} className="h-9 px-3 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-xs">Backing</button>
+          </div>
+        </div>
+        <div className="mt-3 grid grid-cols-[auto_1fr_auto] items-center gap-3">
+          <div className="text-xs tabular-nums text-slate-400 w-28">{formatTime(currentTime)} / {formatTime(duration)}</div>
+          <input type="range" min={0} max={100} value={progress} onChange={(e) => seekPercent(Number(e.target.value))} className="w-full" />
+          <div className="text-xs text-slate-400 w-24 text-right">State: {state}</div>
+        </div>
+        {error && <div className="mt-2 rounded border border-red-500/40 bg-red-950/50 px-2 py-1.5 text-[11px] text-red-100">{error}</div>}
+      </div>
+
+      <div className="absolute right-4 top-36 bottom-4 w-[360px] pointer-events-auto overflow-auto rounded-2xl border border-slate-700 bg-slate-950/88 backdrop-blur p-4 shadow-2xl">
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <div className="rounded-xl bg-slate-900 border border-slate-700 p-3">
+            <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">RenderCache</div>
+            <div className="text-lg font-bold text-white">{project.renderCache?.masterStatus || 'empty'}</div>
+          </div>
+          <div className="rounded-xl bg-slate-900 border border-slate-700 p-3">
+            <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Score Sync</div>
+            <div className="text-lg font-bold text-white">{transportPosition.endTick > 0 ? 'Ready' : 'Waiting'}</div>
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-4 mb-5">
-          <div className="rounded-xl bg-slate-900 border border-slate-700 p-4">
-            <div className="text-[11px] text-slate-500 uppercase tracking-wider mb-2">RenderCache</div>
-            <div className="text-xl font-bold text-white">{project.renderCache?.masterStatus || 'empty'}</div>
-            <div className="text-xs text-slate-500 mt-2 leading-relaxed">{project.renderCache?.message || 'No render cache message.'}</div>
+        <section className="mb-4">
+          <div className="flex items-center gap-2 text-sm font-semibold text-white mb-2"><Route size={15} /> Stage Route</div>
+          <div className="space-y-2">
+            {currentPlan.sections.map((section, index) => (
+              <div key={section.id} className="rounded bg-slate-900/90 border border-slate-800 p-3">
+                <div className="flex items-center justify-between"><div className="text-slate-100 font-semibold text-sm">{index + 1}. {section.name}</div><div className="text-xs text-slate-500">{section.bars}</div></div>
+                <div className="text-xs text-blue-300 mt-2">{section.performanceCue}</div>
+              </div>
+            ))}
           </div>
-          <div className="rounded-xl bg-slate-900 border border-slate-700 p-4">
-            <div className="text-[11px] text-slate-500 uppercase tracking-wider mb-2">Performance Goal</div>
-            <div className="text-xl font-bold text-white">{formatGoalLabel(currentPlan.goal)}</div>
-            <div className="text-xs text-slate-500 mt-2">Status: {currentPlan.status}</div>
+        </section>
+
+        <section>
+          <div className="flex items-center gap-2 text-sm font-semibold text-white mb-2"><Sparkles size={15} /> Live Cues</div>
+          <div className="space-y-2">
+            {currentPlan.buskingCues.map((cue, index) => (
+              <div key={index} className="flex gap-2 rounded bg-slate-900/90 border border-slate-800 p-2.5">
+                <div className="w-6 h-6 rounded-full bg-blue-600 text-white text-[11px] font-bold flex items-center justify-center shrink-0">{index + 1}</div>
+                <div className="text-xs text-slate-300 leading-relaxed">{cue}</div>
+              </div>
+            ))}
           </div>
-          <div className="rounded-xl bg-slate-900 border border-slate-700 p-4">
-            <div className="text-[11px] text-slate-500 uppercase tracking-wider mb-2">Maestro Sound</div>
-            <div className="text-xl font-bold text-white">Prompt Ready</div>
-            <div className="text-xs text-slate-500 mt-2">Next phase attaches AI sound generation engine.</div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <section className="rounded-xl bg-slate-900 border border-slate-700 p-4">
-            <div className="flex items-center gap-2 text-sm font-semibold text-white mb-3"><Route size={15} /> Stage Route</div>
-            <div className="space-y-2">
-              {currentPlan.sections.map((section, index) => (
-                <div key={section.id} className="rounded bg-slate-950/70 border border-slate-800 p-3">
-                  <div className="flex items-center justify-between">
-                    <div className="text-slate-100 font-semibold">{index + 1}. {section.name}</div>
-                    <div className="text-xs text-slate-500">{section.bars}</div>
-                  </div>
-                  <div className="text-xs text-blue-300 mt-2">{section.performanceCue}</div>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section className="rounded-xl bg-slate-900 border border-slate-700 p-4">
-            <div className="flex items-center gap-2 text-sm font-semibold text-white mb-3"><Sparkles size={15} /> Live Cues</div>
-            <div className="space-y-3">
-              {currentPlan.buskingCues.map((cue, index) => (
-                <div key={index} className="flex gap-3 rounded bg-slate-950/70 border border-slate-800 p-3">
-                  <div className="w-7 h-7 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center shrink-0">{index + 1}</div>
-                  <div className="text-sm text-slate-300 leading-relaxed">{cue}</div>
-                </div>
-              ))}
-            </div>
-          </section>
-        </div>
-
-        <section className="mt-5 rounded-xl bg-slate-900 border border-slate-700 p-4">
-          <div className="text-sm font-semibold text-white mb-2">Maestro Sound Prompt</div>
-          <div className="rounded bg-slate-950/70 border border-slate-800 p-3 text-xs text-slate-400 leading-relaxed">{currentPlan.maestroSoundPrompt}</div>
         </section>
       </div>
     </div>
