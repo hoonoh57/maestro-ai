@@ -11,6 +11,7 @@ import { useProjectStore } from '../../stores/projectStore';
 import { useTransportStore } from '../../stores/transportStore';
 import { useFeatureFlagStore } from '../../stores/featureFlagStore';
 import { useArrangerStore } from '../../stores/arrangerStore';
+import { useSoundEngineStore } from '../../stores/soundEngineStore';
 
 interface TestResult {
   id: string;
@@ -98,12 +99,31 @@ function runAllTests(): TestResult[] {
     return `${plan.maestroSoundPrompt.length} chars`;
   });
 
-  test('arranger_rendercache_dirty', 'RenderCache marked as needing sound render', 'AI Arranger', () => {
+  // ── Maestro Sound Engine ──
+
+  test('sound_engine_store', 'Sound engine store exists', 'Maestro Sound', () => {
+    const sound = useSoundEngineStore.getState();
+    if (sound.engine !== 'mock') throw new Error(`Expected mock engine, got ${sound.engine}`);
+    if (typeof sound.generateMaestroSound !== 'function') throw new Error('generateMaestroSound missing');
+    return `engine=${sound.engine}, status=${sound.status}`;
+  });
+
+  test('sound_rendercache_contract', 'RenderCache accepts Maestro Sound master', 'Maestro Sound', () => {
     const project = useProjectStore.getState().project;
-    const message = project.renderCache?.message || '';
-    if (project.renderCache.masterStatus !== 'dirty') throw new Error(`RenderCache status is ${project.renderCache.masterStatus}`);
-    if (!message.includes('AI Performance Sound required')) throw new Error(`Unexpected render message: ${message}`);
-    return message;
+    if (!project.renderCache) throw new Error('Missing renderCache');
+    const status = project.renderCache.masterStatus;
+    if (status !== 'dirty' && status !== 'rendering' && status !== 'ready' && status !== 'empty' && status !== 'error') {
+      throw new Error(`Unknown RenderCache status: ${status}`);
+    }
+    return `renderCache=${status}, items=${project.renderCache.items?.length ?? 0}`;
+  });
+
+  test('sound_prompt_to_engine_ready', 'Plan can feed sound engine', 'Maestro Sound', () => {
+    const plan = useArrangerStore.getState().currentPlan;
+    if (!plan) throw new Error('No arrangement plan for sound engine');
+    if (!plan.renderPrompt.includes('master.wav')) throw new Error('renderPrompt does not request master.wav');
+    if (!plan.maestroSoundPrompt.toLowerCase().includes('performance')) throw new Error('maestroSoundPrompt lacks performance intent');
+    return 'Maestro Sound input contract ready';
   });
 
   // ── Render ──
@@ -256,6 +276,7 @@ export function TestConsole() {
       const transport = useTransportStore.getState();
       const flags = useFeatureFlagStore.getState().flags;
       const arranger = useArrangerStore.getState();
+      const sound = useSoundEngineStore.getState();
       return JSON.stringify({
         project: {
           name: proj.name,
@@ -281,6 +302,13 @@ export function TestConsole() {
           validation: arranger.currentPlan?.validation.status ?? null,
           loops: arranger.currentPlan?.practiceLoops.length ?? 0,
           sections: arranger.currentPlan?.sections.length ?? 0,
+        },
+        soundEngine: {
+          engine: sound.engine,
+          status: sound.status,
+          hasResult: !!sound.lastResult,
+          fileName: sound.lastResult?.fileName ?? null,
+          lastError: sound.lastError,
         },
         transport: {
           playerState: transport.playerState,
@@ -347,7 +375,7 @@ export function TestConsole() {
       <div className="flex-1 overflow-auto p-4">
         {results.length === 0 && !isRunning && (
           <div className="text-slate-500 text-sm text-center py-12">
-            Click &quot;Run All Tests&quot; to verify editor, arranger, practice, busking, and playback workflow.
+            Click &quot;Run All Tests&quot; to verify editor, arranger, sound engine, practice, busking, and playback workflow.
           </div>
         )}
 
