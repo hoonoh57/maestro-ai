@@ -4,6 +4,7 @@ import { ScoreCanvas } from '../editor/ScoreCanvas';
 import { TestConsole } from '../modes/TestConsole';
 import { TrackMixerPanel } from '../mixer/TrackMixerPanel';
 import { BackingInspector } from '../inspector/BackingInspector';
+import { BuskingArrangePanel } from '../arranger/BuskingArrangePanel';
 
 function PlaceholderMode({ title, phase }: { title: string; phase: number }) {
   return (
@@ -42,6 +43,7 @@ export function MainViewport() {
           <TestConsole />
         </div>
       )}
+      {mode === 'arrange' && <BuskingArrangePanel />}
       {mode === 'practice' && <PlaceholderMode title="Practice Mode" phase={6} />}
       {mode === 'backing' && <BackingModePanel />}
       {mode === 'busking' && <PlaceholderMode title="Busking Mode" phase={4} />}
