@@ -2,14 +2,18 @@ import { create } from 'zustand';
 import { useArrangerStore } from './arrangerStore';
 import { useProjectStore } from './projectStore';
 import { renderMockMaestroSound } from '../services/sound/MockMaestroSoundEngine';
+import { checkLocalSoundServer, renderWithLocalSoundServer } from '../services/sound/LocalMaestroSoundEngine';
 import type { MaestroSoundEngineKind, MaestroSoundJobStatus, MaestroSoundRenderResult } from '../services/sound/MaestroSoundEngineTypes';
+import type { SoundServerHealth } from '../services/sound/SoundServerClient';
 
 interface SoundEngineState {
   engine: MaestroSoundEngineKind;
   status: MaestroSoundJobStatus;
   lastResult: MaestroSoundRenderResult | null;
+  lastHealth: SoundServerHealth | null;
   lastError: string;
   setEngine: (engine: MaestroSoundEngineKind) => void;
+  checkServer: () => Promise<SoundServerHealth>;
   generateMaestroSound: () => Promise<MaestroSoundRenderResult>;
   clearGeneratedSound: () => void;
 }
@@ -18,9 +22,22 @@ export const useSoundEngineStore = create<SoundEngineState>((set, get) => ({
   engine: 'mock',
   status: 'idle',
   lastResult: null,
+  lastHealth: null,
   lastError: '',
 
   setEngine: (engine) => set({ engine }),
+
+  checkServer: async () => {
+    try {
+      const health = await checkLocalSoundServer();
+      set({ lastHealth: health, lastError: '' });
+      return health;
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Sound server health check failed.';
+      set({ lastError: message, lastHealth: null });
+      throw e;
+    }
+  },
 
   generateMaestroSound: async () => {
     const arranger = useArrangerStore.getState();
@@ -33,20 +50,24 @@ export const useSoundEngineStore = create<SoundEngineState>((set, get) => ({
       renderCache: {
         ...projectStore.project.renderCache,
         masterStatus: 'rendering',
-        lastRenderEngine: engine === 'mock' ? 'external' : 'external',
+        lastRenderEngine: 'external',
         message: `Generating Maestro Sound with ${engine} engine...`,
       },
     });
 
     try {
-      const result = await renderMockMaestroSound({
+      const request = {
         projectId: projectStore.project.id,
         projectName: projectStore.project.name,
         plan,
         engine,
         sampleRate: 44100,
         durationSeconds: 10,
-      });
+      };
+
+      const result = engine === 'local_ai' || engine === 'external_runtime'
+        ? await renderWithLocalSoundServer(request)
+        : await renderMockMaestroSound(request);
 
       const nextRenderCache = {
         masterStatus: 'ready' as const,
