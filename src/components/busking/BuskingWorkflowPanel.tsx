@@ -116,7 +116,7 @@ export function BuskingWorkflowPanel() {
     return player;
   };
 
-  const loadUrl = async (url: string, name: string) => {
+  const loadUrl = async (url: string, name: string): Promise<boolean> => {
     const player = ensureAudio();
     player.pause();
     stopSyncTimer();
@@ -134,9 +134,10 @@ export function BuskingWorkflowPanel() {
     setCurrentTime(0);
     setDuration(0);
     setError('');
+    return true;
   };
 
-  const loadRemoteAsBlob = async (url: string, name: string) => {
+  const loadRemoteAsBlob = async (url: string, name: string): Promise<boolean> => {
     setState('loading');
     setFileName(name);
     setError('Loading rendered performance audio...');
@@ -148,25 +149,25 @@ export function BuskingWorkflowPanel() {
       releaseObjectUrl();
       const objectUrl = URL.createObjectURL(blob);
       objectUrlRef.current = objectUrl;
-      await loadUrl(objectUrl, name);
+      return await loadUrl(objectUrl, name);
     } catch (e) {
       setState('error');
       setError(e instanceof Error ? e.message : String(e));
+      return false;
     }
   };
 
-  const loadMaster = async () => {
+  const loadMaster = async (): Promise<boolean> => {
     if (!masterItem) {
       setState('error');
       setError('No rendered master in current project. Select a generated master from the list or generate a new one.');
-      return;
+      return false;
     }
     const url = masterItem.fileUrl;
     if (url.startsWith('http://') || url.startsWith('https://')) {
-      await loadRemoteAsBlob(url, masterItem.fileName);
-      return;
+      return await loadRemoteAsBlob(url, masterItem.fileName);
     }
-    await loadUrl(url, masterItem.fileName);
+    return await loadUrl(url, masterItem.fileName);
   };
 
   const refreshGeneratedFiles = async () => {
@@ -188,23 +189,8 @@ export function BuskingWorkflowPanel() {
     }
   };
 
-  const loadGeneratedFile = async (name: string) => {
-    await loadRemoteAsBlob(generatedFileUrl(name), name);
-  };
-
-  const playPause = async () => {
-    const player = ensureAudio();
-    if (!player.src && masterItem) await loadMaster();
+  const playLoadedAudio = async () => {
     const active = ensureAudio();
-    if (!active.src) {
-      setState('error');
-      setError('No busking audio loaded. Select a generated master or generate Performance Sound first.');
-      return;
-    }
-    if (state === 'playing') {
-      active.pause();
-      return;
-    }
     try {
       try { engine.stop(); } catch {}
       await active.play();
@@ -213,6 +199,37 @@ export function BuskingWorkflowPanel() {
       setState('error');
       setError(e instanceof Error ? e.message : 'Busking playback failed.');
     }
+  };
+
+  const loadGeneratedFile = async (name: string, autoPlay: boolean = true) => {
+    const ok = await loadRemoteAsBlob(generatedFileUrl(name), name);
+    if (ok && autoPlay) await playLoadedAudio();
+  };
+
+  const loadLatestGeneratedFile = async (): Promise<boolean> => {
+    if (generatedFiles.length > 0) {
+      return await loadRemoteAsBlob(generatedFileUrl(generatedFiles[0]), generatedFiles[0]);
+    }
+    setState('error');
+    setError('No generated WAV files found. Refresh the generated masters list or generate Performance Sound first.');
+    return false;
+  };
+
+  const playPause = async () => {
+    const player = ensureAudio();
+    if (state === 'playing') {
+      player.pause();
+      return;
+    }
+
+    if (!player.src) {
+      let loaded = false;
+      if (masterItem) loaded = await loadMaster();
+      if (!loaded) loaded = await loadLatestGeneratedFile();
+      if (!loaded) return;
+    }
+
+    await playLoadedAudio();
   };
 
   const stop = () => {
@@ -316,9 +333,9 @@ export function BuskingWorkflowPanel() {
           <div className="space-y-1 max-h-44 overflow-auto pr-1">
             {generatedFiles.length === 0 && <div className="rounded bg-slate-900/90 border border-slate-800 p-3 text-xs text-slate-500">No generated WAV files found yet.</div>}
             {generatedFiles.map((name) => (
-              <button key={name} onClick={() => void loadGeneratedFile(name)} className={`w-full text-left rounded border p-2 text-xs transition-colors ${fileName === name ? 'bg-blue-950/70 border-blue-600 text-blue-100' : 'bg-slate-900/90 border-slate-800 text-slate-300 hover:bg-slate-800'}`}>
+              <button key={name} onClick={() => void loadGeneratedFile(name, true)} className={`w-full text-left rounded border p-2 text-xs transition-colors ${fileName === name ? 'bg-blue-950/70 border-blue-600 text-blue-100' : 'bg-slate-900/90 border-slate-800 text-slate-300 hover:bg-slate-800'}`}>
                 <div className="truncate font-medium">{name}</div>
-                <div className="text-[10px] text-slate-500 mt-0.5">Click to load for busking playback</div>
+                <div className="text-[10px] text-slate-500 mt-0.5">Click to load and play</div>
               </button>
             ))}
           </div>
