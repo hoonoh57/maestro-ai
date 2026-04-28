@@ -83,12 +83,15 @@ export function ScoreCanvas() {
     return [
       `init:${formatReadyText(initialized)}`,
       `player:${formatReadyText(isReady)}`,
+      `sf:${sfPct}%`,
+      `profile:${diagnostics.playbackProfile ?? 'n/a'}`,
+      `buf:${diagnostics.bufferTimeInMilliseconds ?? 0}ms`,
       `score:${diagnostics.scoreLoadedCount}`,
       `render:${diagnostics.renderFinishedCount}`,
       `tracks:${diagnostics.trackCount}`,
       `size:${diagnostics.lastContainerWidth}x${diagnostics.lastContainerHeight}`,
     ].join('  |  ');
-  }, [diagnostics, initialized, isReady]);
+  }, [diagnostics, initialized, isReady, sfPct]);
 
   const closeImportUi = useCallback(() => {
     setPromptOpen(false);
@@ -155,7 +158,7 @@ export function ScoreCanvas() {
         </button>
       )}
 
-      <div className="absolute top-2 right-2 z-20 rounded bg-slate-950/70 border border-slate-700/60 px-2 py-1 text-[10px] text-slate-400 font-mono pointer-events-none">
+      <div className="absolute top-2 right-2 z-20 rounded bg-slate-950/70 border border-slate-700/60 px-2 py-1 text-[10px] text-slate-400 font-mono pointer-events-none max-w-[720px] truncate">
         {diagnosticText}
       </div>
 
