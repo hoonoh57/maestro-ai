@@ -11,9 +11,10 @@ from pydantic import BaseModel, Field
 
 from engines.mock_engine import render_mock_audio
 from engines.ace_step_engine import render_ace_step_audio
+from engines.performance_pack_engine import render_performance_pack_audio
 
 APP_NAME = "MaestroAI Local Sound Server"
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.3.0"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(BASE_DIR, "outputs")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -32,9 +33,9 @@ app.mount("/outputs", StaticFiles(directory=OUTPUT_DIR), name="outputs")
 class RenderRequest(BaseModel):
     projectId: str = ""
     projectName: str = "Untitled"
-    engine: str = "ace_step"
+    engine: str = "performance_pack"
     sampleRate: int = Field(default=44100, ge=8000, le=96000)
-    durationSeconds: float = Field(default=12.0, ge=1.0, le=300.0)
+    durationSeconds: float = Field(default=16.0, ge=1.0, le=300.0)
     plan: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -57,19 +58,21 @@ def health() -> Dict[str, Any]:
         "ok": True,
         "name": APP_NAME,
         "version": APP_VERSION,
-        "engines": ["ace_step", "mock", "local_ai", "external_runtime"],
-        "defaultEngine": "ace_step",
+        "engines": ["performance_pack", "ace_step", "mock", "local_ai", "external_runtime"],
+        "defaultEngine": "performance_pack",
         "outputBaseUrl": "/outputs",
     }
 
 
 @app.post("/api/sound/render", response_model=RenderResponse)
 def render_sound(request: RenderRequest) -> RenderResponse:
-    engine = (request.engine or "ace_step").strip().lower()
+    engine = (request.engine or "performance_pack").strip().lower()
     payload = request.model_dump()
 
     try:
-        if engine in ("mock", "local_ai", "external_runtime"):
+        if engine == "performance_pack":
+            rendered = render_performance_pack_audio(payload, OUTPUT_DIR)
+        elif engine in ("mock", "local_ai", "external_runtime"):
             rendered = render_mock_audio(payload, OUTPUT_DIR)
         elif engine == "ace_step":
             rendered = render_ace_step_audio(payload, OUTPUT_DIR)
