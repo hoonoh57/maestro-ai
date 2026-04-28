@@ -17,10 +17,22 @@ const QUALITY_OPTIONS = [
 const SOUNDFONT_OPTIONS = [
   { value: '/soundfont/sonivox.sf2', label: 'Sonivox GM - bundled' },
   { value: '/soundfont/FluidR3_GM.sf2', label: 'FluidR3 GM - high quality' },
+  { value: '/soundfont/MuseScore_General.sf2', label: 'MuseScore General - external' },
+  { value: '/soundfont/Arachno.sf2', label: 'Arachno GM - external' },
+  { value: '/soundfont/Timbres_Of_Heaven.sf2', label: 'Timbres of Heaven - external' },
 ];
+
+function normalizeSoundFontUrl(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return '/soundfont/FluidR3_GM.sf2';
+  if (trimmed.startsWith('/')) return trimmed;
+  if (trimmed.toLowerCase().startsWith('http://') || trimmed.toLowerCase().startsWith('https://')) return trimmed;
+  return `/soundfont/${trimmed}`;
+}
 
 export function PlaybackQualityPanel() {
   const [profile, setProfile] = useState(() => getPlaybackQualityProfile());
+  const [customSoundFont, setCustomSoundFont] = useState(profile.soundFontUrl);
 
   const hint = useMemo(() => {
     if (profile.mode === 'studio') return 'Higher buffer and safer playback for imported GP files.';
@@ -30,6 +42,12 @@ export function PlaybackQualityPanel() {
   const updateProfile = (patch: Partial<typeof profile>) => {
     const next = savePlaybackQualityProfile(patch);
     setProfile(next);
+    if (typeof patch.soundFontUrl === 'string') setCustomSoundFont(patch.soundFontUrl);
+  };
+
+  const applyCustomSoundFont = () => {
+    const nextUrl = normalizeSoundFontUrl(customSoundFont);
+    updateProfile({ soundFontUrl: nextUrl });
   };
 
   return (
@@ -46,6 +64,21 @@ export function PlaybackQualityPanel() {
         options={SOUNDFONT_OPTIONS}
         onChange={(v) => updateProfile({ soundFontUrl: v })}
       />
+      <div className="px-3 pb-2">
+        <label className="block text-[11px] text-slate-500 mb-1">External SoundFont URL / file name</label>
+        <input
+          value={customSoundFont}
+          onChange={(e) => setCustomSoundFont(e.target.value)}
+          placeholder="/soundfont/MyHighQuality.sf2"
+          className="w-full h-8 rounded bg-slate-900 border border-slate-700 px-2 text-[11px] text-slate-200 outline-none focus:border-blue-500"
+        />
+        <button
+          onClick={applyCustomSoundFont}
+          className="mt-2 h-7 rounded bg-slate-800 hover:bg-slate-700 px-2.5 text-[11px] text-slate-200"
+        >
+          Use this SoundFont
+        </button>
+      </div>
       <NumberField
         label="Buffer ms"
         value={profile.bufferTimeInMilliseconds}
@@ -62,7 +95,7 @@ export function PlaybackQualityPanel() {
       />
       <div className="px-3 pb-2 text-[11px] text-slate-500 leading-relaxed">
         {hint}<br />
-        Reload the page after changing SoundFont or buffer profile.
+        External SF2/SF3 files should be placed under <span className="text-slate-300">public/soundfont</span> or served by a trusted local library server.
       </div>
       <button
         onClick={() => window.location.reload()}
