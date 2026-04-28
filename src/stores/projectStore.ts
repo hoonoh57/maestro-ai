@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type * as alphaTab from '@coderline/alphatab';
 import type { MaestroProject, MaestroTrack } from '../types/project';
+import { sanitizeArtistName, sanitizeScoreTitle, sanitizeTrackName } from '../services/text/TextSanitizer';
 
 const DEFAULT_COLORS = ['#3b82f6', '#22c55e', '#ef4444', '#facc15', '#a855f7', '#ec4899', '#14b8a6', '#6366f1', '#f97316', '#78716c'];
 
@@ -39,7 +40,6 @@ interface ProjectState {
   setTrackVolume: (id: string, volume: number) => void;
   setTrackCollapsed: (id: string, collapsed: boolean) => void;
 
-  // ★ 새로 추가: TrackInspector용 범용 업데이트
   updateTrack: (index: number, patch: Partial<MaestroTrack>) => void;
 
   saveToLocal: () => void;
@@ -56,10 +56,21 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     isDirty: true,
   })),
 
-  setProject: (p) => set({ project: p, isDirty: false }),
+  setProject: (p) => set({
+    project: {
+      ...p,
+      name: sanitizeScoreTitle(p.name, 'Untitled Project'),
+      artist: sanitizeArtistName(p.artist, ''),
+      tracks: p.tracks.map((track, index) => ({
+        ...track,
+        name: sanitizeTrackName(track.name, index),
+      })),
+    },
+    isDirty: false,
+  }),
 
   setProjectName: (name) => set((s) => ({
-    project: { ...s.project, name, updatedAt: new Date().toISOString() },
+    project: { ...s.project, name: sanitizeScoreTitle(name, s.project.name || 'Untitled Project'), updatedAt: new Date().toISOString() },
     isDirty: true,
   })),
 
@@ -74,9 +85,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   })),
 
   syncFromScore: (score) => set((s) => {
+    const safeProjectName = sanitizeScoreTitle(score.title, s.project.name || 'Untitled Project');
+    const safeArtist = sanitizeArtistName(score.artist, s.project.artist || '');
+
     const tracks: MaestroTrack[] = score.tracks.map((t: any, i: number) => ({
       id: `track-${i}`,
-      name: t.name || `Track ${i + 1}`,
+      name: sanitizeTrackName(t.name, i),
       instrument: t.playbackInfo?.program?.toString() ?? 'acoustic_guitar',
       color: DEFAULT_COLORS[i % DEFAULT_COLORS.length],
       volume: Math.round(((t.playbackInfo?.volume ?? 15) / 16) * 100),
@@ -89,8 +103,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     return {
       project: {
         ...s.project,
-        name: score.title || s.project.name,
-        artist: score.artist || s.project.artist || '',
+        name: safeProjectName,
+        artist: safeArtist,
         bpm: score.tempo || s.project.bpm,
         tracks,
         updatedAt: new Date().toISOString(),
@@ -102,7 +116,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   addTrack: (name, instrument) => set((s) => {
     const newTrack: MaestroTrack = {
       id: crypto.randomUUID(),
-      name,
+      name: sanitizeTrackName(name, s.project.tracks.length),
       instrument,
       color: DEFAULT_COLORS[s.project.tracks.length % DEFAULT_COLORS.length],
       volume: 80,
@@ -125,7 +139,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   duplicateTrack: (id) => set((s) => {
     const original = s.project.tracks.find(t => t.id === id);
     if (!original) return {};
-    const dup: MaestroTrack = { ...original, id: crypto.randomUUID(), name: `${original.name} (Copy)` };
+    const dup: MaestroTrack = { ...original, id: crypto.randomUUID(), name: `${sanitizeTrackName(original.name, 0)} (Copy)` };
     const idx = s.project.tracks.findIndex(t => t.id === id);
     const tracks = [...s.project.tracks];
     tracks.splice(idx + 1, 0, dup);
@@ -148,11 +162,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     project: { ...s.project, tracks: s.project.tracks.map(t => t.id === id ? { ...t, collapsed } : t) },
   })),
 
-  // ★ 새로 추가
   updateTrack: (index, patch) => set((s) => {
     const tracks = [...s.project.tracks];
     if (index >= 0 && index < tracks.length) {
-      tracks[index] = { ...tracks[index], ...patch };
+      const nextPatch = { ...patch };
+      if (typeof nextPatch.name === 'string') nextPatch.name = sanitizeTrackName(nextPatch.name, index);
+      tracks[index] = { ...tracks[index], ...nextPatch };
     }
     return {
       project: { ...s.project, tracks, updatedAt: new Date().toISOString() },
@@ -173,7 +188,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const raw = localStorage.getItem(`maestro_project_${lastId}`);
     if (!raw) return false;
     try {
-      set({ project: JSON.parse(raw), isDirty: false });
+      const parsed = JSON.parse(raw) as MaestroProject;
+      set({
+        project: {
+          ...parsed,
+          name: sanitizeScoreTitle(parsed.name, 'Untitled Project'),
+          artist: sanitizeArtistName(parsed.artist, ''),
+          tracks: parsed.tracks.map((track, index) => ({ ...track, name: sanitizeTrackName(track.name, index) })),
+        },
+        isDirty: false,
+      });
       return true;
     } catch { return false; }
   },
