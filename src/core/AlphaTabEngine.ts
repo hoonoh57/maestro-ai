@@ -1,4 +1,10 @@
 import * as alphaTab from '@coderline/alphatab';
+import {
+  getAlphaTabPlayerSettings,
+  getPlaybackQualityProfile,
+  normalizeTrackVolume,
+  type PlaybackQualityProfile,
+} from '../services/playback/PlaybackQualityService';
 
 export type PlayerState = 'stopped' | 'playing' | 'paused';
 
@@ -21,6 +27,9 @@ export interface EngineDiagnostics {
   currentPlayerState: PlayerState;
   playbackSpeed: number;
   lastScoreLoadTime: number;
+  playbackProfile: string;
+  soundFontUrl: string;
+  bufferTimeInMilliseconds: number;
 }
 
 export interface EngineCallbacks {
@@ -66,6 +75,7 @@ export class AlphaTabEngine {
   private currentPlayerState: PlayerState = 'stopped';
   private lastScoreLoadTime = 0;
   private pendingPlayTimer: number | null = null;
+  private playbackProfile: PlaybackQualityProfile = getPlaybackQualityProfile();
 
   get isInitialized(): boolean { return this.api !== null; }
   get isPlayerReady(): boolean { return this._isPlayerReady; }
@@ -86,6 +96,9 @@ export class AlphaTabEngine {
       currentPlayerState: this.currentPlayerState,
       playbackSpeed: this.api?.playbackSpeed ?? 1,
       lastScoreLoadTime: this.lastScoreLoadTime,
+      playbackProfile: this.playbackProfile.mode,
+      soundFontUrl: this.playbackProfile.soundFontUrl,
+      bufferTimeInMilliseconds: this.playbackProfile.bufferTimeInMilliseconds,
     };
   }
 
@@ -95,6 +108,7 @@ export class AlphaTabEngine {
     callbacks: EngineCallbacks,
   ): boolean {
     this.callbacks = callbacks;
+    this.playbackProfile = getPlaybackQualityProfile();
 
     const rect = container.getBoundingClientRect();
     this.lastContainerWidth = Math.round(rect.width);
@@ -122,6 +136,8 @@ export class AlphaTabEngine {
     this.currentPlayerState = 'stopped';
     this.lastScoreLoadTime = 0;
 
+    const playerSettings = getAlphaTabPlayerSettings(this.playbackProfile, alphaTab);
+
     const settings: any = {
       core: {
         fontDirectory: '/font/',
@@ -140,14 +156,8 @@ export class AlphaTabEngine {
         },
       },
       player: {
-        enablePlayer: true,
-        enableCursor: true,
-        enableUserInteraction: true,
-        enableAnimatedBeatCursor: true,
-        enableElementHighlighting: true,
-        soundFont: '/soundfont/sonivox.sf2',
+        ...playerSettings,
         scrollElement: viewport ?? undefined,
-        scrollMode: 2,
       },
       notation: {
         notationMode: 0,
@@ -175,6 +185,7 @@ export class AlphaTabEngine {
       this.scoreLoadedCount += 1;
       this.lastScoreLoadTime = Date.now();
       this.normalizeAfterScoreLoad();
+      this.normalizeScoreMix(score);
       this.callbacks.onScoreLoaded?.(score);
     });
 
@@ -240,8 +251,9 @@ export class AlphaTabEngine {
 
   private normalizePlaybackDefaults(): void {
     if (this.api === null) return;
+    this.playbackProfile = getPlaybackQualityProfile();
     this.api.playbackSpeed = 1;
-    this.api.masterVolume = 0.8;
+    this.api.masterVolume = this.playbackProfile.masterVolume;
     this.api.metronomeVolume = 0;
     this.api.countInVolume = 0;
     this.api.isLooping = false;
@@ -257,6 +269,24 @@ export class AlphaTabEngine {
     this.normalizePlaybackDefaults();
   }
 
+  private normalizeScoreMix(score: alphaTab.model.Score): void {
+    if (this.api === null) return;
+
+    for (let i = 0; i < score.tracks.length; i += 1) {
+      const track = score.tracks[i];
+      const playbackInfo = (track as any).playbackInfo;
+      if (!playbackInfo) continue;
+
+      const currentVolume = typeof playbackInfo.volume === 'number' ? playbackInfo.volume / 16 : this.playbackProfile.minTrackVolume;
+      const nextVolume = normalizeTrackVolume(currentVolume, this.playbackProfile);
+      playbackInfo.volume = Math.max(1, Math.min(16, Math.round(nextVolume * 16)));
+    }
+
+    try {
+      this.api.changeTrackVolume(score.tracks, this.playbackProfile.masterVolume);
+    } catch {}
+  }
+
   private clearPendingPlay(): void {
     if (this.pendingPlayTimer !== null) {
       window.clearTimeout(this.pendingPlayTimer);
@@ -266,8 +296,11 @@ export class AlphaTabEngine {
 
   private getPlaybackStabilizationDelay(): number {
     const trackCount = this.score?.tracks?.length ?? this.tracks.length ?? 1;
-    const baseDelay = 180;
-    const trackDelay = Math.min(800, Math.max(0, trackCount - 1) * 120);
+    const baseDelay = this.playbackProfile.stabilizationBaseDelay;
+    const trackDelay = Math.min(
+      this.playbackProfile.stabilizationMaxTrackDelay,
+      Math.max(0, trackCount - 1) * this.playbackProfile.stabilizationPerTrackDelay,
+    );
     return baseDelay + trackDelay;
   }
 
@@ -337,9 +370,10 @@ export class AlphaTabEngine {
       this.pendingPlayTimer = null;
       if (this.api === null) return;
       if (!this._isPlayerReady) {
-        this.pendingPlayTimer = window.setTimeout(() => this.safePlay(), 200);
+        this.pendingPlayTimer = window.setTimeout(() => this.safePlay(), 240);
         return;
       }
+      try { this.api.tickPosition = Math.max(0, this.api.tickPosition); } catch {}
       this.api.play();
     }, delay);
   }
