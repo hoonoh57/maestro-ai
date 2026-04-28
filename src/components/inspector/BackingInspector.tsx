@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { InspectorSection } from '../shared/InspectorSection';
-import { Download, FolderOpen, Music, Pause, Play, Repeat, Square, Upload, Volume2 } from 'lucide-react';
+import { Download, FolderOpen, Music, Pause, Play, Repeat, Square, Upload, Volume2, Waves } from 'lucide-react';
+import { useProjectStore } from '../../stores/projectStore';
 
 type PlayerState = 'empty' | 'loading' | 'ready' | 'playing' | 'paused' | 'stopped' | 'error';
 
@@ -53,11 +54,13 @@ function isSupportedAudioFile(file: File): boolean {
 }
 
 function fileNameFromUrl(url: string): string {
+  if (url.startsWith('blob:')) return 'Generated Maestro Sound';
   const parts = url.split('/');
   return parts[parts.length - 1] || url;
 }
 
 export function BackingInspector() {
+  const renderCache = useProjectStore((s) => s.project.renderCache);
   const inputRef = useRef<HTMLInputElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const contextRef = useRef<AudioContext | null>(null);
@@ -179,10 +182,10 @@ export function BackingInspector() {
   const loadAudioUrl = async (url: string, fileName?: string) => {
     const audio = ensureAudio();
     audio.pause();
-    releaseObjectUrl();
+    if (!url.startsWith('blob:')) releaseObjectUrl();
     stopTimer();
 
-    audio.src = `${url}?v=${Date.now()}`;
+    audio.src = url.startsWith('blob:') ? url : `${url}?v=${Date.now()}`;
     audio.volume = snapshot.volume;
     audio.playbackRate = snapshot.rate;
     audio.preservesPitch = true;
@@ -198,7 +201,24 @@ export function BackingInspector() {
     }
   };
 
+  const loadGeneratedRenderCacheMaster = async () => {
+    const item = renderCache?.items?.find((cacheItem) => cacheItem.kind === 'master' && cacheItem.status === 'ready' && cacheItem.fileUrl);
+    if (!item) {
+      patch({ state: 'error', error: 'No generated Maestro Sound master in RenderCache. Use Arrange → Generate Maestro Sound first.' });
+      return;
+    }
+    await loadAudioUrl(item.fileUrl, item.fileName);
+  };
+
   const loadRenderCacheMaster = async () => {
+    if (renderCache?.masterStatus === 'ready') {
+      const item = renderCache.items?.find((cacheItem) => cacheItem.kind === 'master' && cacheItem.status === 'ready' && cacheItem.fileUrl);
+      if (item) {
+        await loadAudioUrl(item.fileUrl, item.fileName);
+        return;
+      }
+    }
+
     patch({ state: 'loading', error: 'Searching /public/rendered/performance-master.* ...' });
     for (const url of RENDERED_MASTER_CANDIDATES) {
       try {
@@ -213,7 +233,7 @@ export function BackingInspector() {
     }
     patch({
       state: 'error',
-      error: 'No RenderCache master found. Place performance-master.mp3 or performance-master.wav under public/rendered, then click Load RenderCache Master.',
+      error: 'No RenderCache master found. Generate Maestro Sound or place performance-master.mp3/wav under public/rendered.',
     });
   };
 
@@ -337,6 +357,13 @@ export function BackingInspector() {
           <Upload size={14} /> Import MP3 / WAV / MR
         </button>
         <button
+          onClick={() => void loadGeneratedRenderCacheMaster()}
+          disabled={renderCache?.masterStatus !== 'ready'}
+          className="mt-2 w-full h-9 rounded bg-purple-700 hover:bg-purple-600 disabled:bg-slate-800 disabled:text-slate-500 text-white text-[12px] font-medium transition-colors flex items-center justify-center gap-2"
+        >
+          <Waves size={14} /> Load Generated Maestro Sound
+        </button>
+        <button
           onClick={() => void loadRenderCacheMaster()}
           className="mt-2 w-full h-9 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-[12px] font-medium transition-colors flex items-center justify-center gap-2"
         >
@@ -423,7 +450,7 @@ export function BackingInspector() {
 
       <InspectorSection title="RenderCache Folder Rule" icon={<Download size={12} />} defaultOpen={false}>
         <div className="px-3 pb-3 text-[11px] text-slate-400 leading-relaxed">
-          Place high-quality output at <span className="text-slate-200">public/rendered/performance-master.mp3</span> or <span className="text-slate-200">performance-master.wav</span>. Then click <span className="text-emerald-300">Load RenderCache Master</span>.
+          Generate Maestro Sound in Arrange, or place high-quality output at <span className="text-slate-200">public/rendered/performance-master.mp3</span> / <span className="text-slate-200">performance-master.wav</span>.
         </div>
       </InspectorSection>
     </div>
