@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Mic2, MonitorPlay, Music, Pause, Play, RefreshCw, Route, Square, Sparkles } from 'lucide-react';
 import { engine } from '../../core/AlphaTabEngine';
-import { getSoundServerUrl } from '../../services/sound/LocalMaestroSoundEngine';
 import { useArrangerStore } from '../../stores/arrangerStore';
+import { useAudioLibraryStore, type MasterAudioItem } from '../../stores/audioLibraryStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useTransportStore } from '../../stores/transportStore';
 import { useUIStore } from '../../stores/uiStore';
@@ -19,35 +19,12 @@ function formatTime(seconds: number): string {
   return `${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
 }
 
-function generatedFileUrl(fileName: string): string {
-  return `${getSoundServerUrl()}/outputs/${encodeURIComponent(fileName)}`;
-}
-
 function normalizeForMatch(value: string): string {
   return (value || '')
     .toLowerCase()
     .replace(/\.wav$/i, '')
     .replace(/performance_pack_\d+_\d+_\d+_/i, '')
     .replace(/[^\p{L}\p{N}]+/gu, '');
-}
-
-interface SoundJobItem {
-  fileName: string;
-  fileUrl: string;
-  metadataFileName?: string | null;
-  jobId: string;
-  engine: string;
-  projectId: string;
-  projectName: string;
-  sourceTitle: string;
-  sourceArtist: string;
-  bpm: number;
-  key: string;
-  durationSeconds: number;
-  sampleRate: number;
-  createdAt: string;
-  message: string;
-  hasMetadata: boolean;
 }
 
 type BuskingPlayerState = 'empty' | 'loading' | 'ready' | 'playing' | 'paused' | 'stopped' | 'error';
@@ -61,6 +38,18 @@ export function BuskingWorkflowPanel() {
   const setTransportPosition = useTransportStore((s) => s.setPosition);
   const setPlayerState = useTransportStore((s) => s.setPlayerState);
 
+  const audioItems = useAudioLibraryStore((s) => s.items);
+  const selectedItem = useAudioLibraryStore((s) => s.selectedItem);
+  const currentLink = useAudioLibraryStore((s) => s.currentLink);
+  const isRefreshingFiles = useAudioLibraryStore((s) => s.isRefreshing);
+  const libraryError = useAudioLibraryStore((s) => s.lastError);
+  const refreshAudioLibrary = useAudioLibraryStore((s) => s.refreshFromServer);
+  const selectAudioItem = useAudioLibraryStore((s) => s.selectItem);
+  const attachAudioToProject = useAudioLibraryStore((s) => s.attachToCurrentProject);
+  const getMatchingItems = useAudioLibraryStore((s) => s.getMatchingItems);
+  const getOtherItems = useAudioLibraryStore((s) => s.getOtherItems);
+  const loadCurrentProjectLink = useAudioLibraryStore((s) => s.loadCurrentProjectLink);
+
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const objectUrlRef = useRef<string>('');
   const timerRef = useRef<number | null>(null);
@@ -69,45 +58,31 @@ export function BuskingWorkflowPanel() {
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [error, setError] = useState('');
-  const [generatedJobs, setGeneratedJobs] = useState<SoundJobItem[]>([]);
-  const [isRefreshingFiles, setIsRefreshingFiles] = useState(false);
 
   const masterItem = useMemo(() => {
     return project.renderCache?.items?.find((item) => item.kind === 'master' && item.status === 'ready' && item.fileUrl) || null;
   }, [project.renderCache]);
 
   const scoreMatchKey = useMemo(() => normalizeForMatch(project.name || currentPlan?.title || ''), [project.name, currentPlan?.title]);
-
-  const matchedJobs = useMemo(() => {
-    if (!scoreMatchKey) return [];
-    return generatedJobs.filter((job) => {
-      const titleKey = normalizeForMatch(job.projectName || job.sourceTitle || job.fileName);
-      const fileKey = normalizeForMatch(job.fileName);
-      return titleKey.includes(scoreMatchKey) || scoreMatchKey.includes(titleKey) || fileKey.includes(scoreMatchKey);
-    });
-  }, [generatedJobs, scoreMatchKey]);
-
-  const otherJobs = useMemo(() => {
-    const matched = new Set(matchedJobs.map((job) => job.fileName));
-    return generatedJobs.filter((job) => !matched.has(job.fileName));
-  }, [generatedJobs, matchedJobs]);
+  const matchedJobs = useMemo(() => getMatchingItems(project.name || currentPlan?.title || ''), [audioItems, currentPlan?.title, getMatchingItems, project.name]);
+  const otherJobs = useMemo(() => getOtherItems(project.name || currentPlan?.title || ''), [audioItems, currentPlan?.title, getOtherItems, project.name]);
 
   const progress = duration > 0 ? Math.max(0, Math.min(100, (currentTime / duration) * 100)) : 0;
 
-  const selectedJob = useMemo(() => generatedJobs.find((job) => job.fileName === fileName) || null, [generatedJobs, fileName]);
+  const activeItem = selectedItem || audioItems.find((item) => item.fileName === fileName) || null;
 
   const mismatchWarning = useMemo(() => {
     if (!fileName) return '';
-    if (selectedJob?.hasMetadata) {
-      const jobKey = normalizeForMatch(selectedJob.projectName || selectedJob.sourceTitle || selectedJob.fileName);
+    if (activeItem?.hasMetadata) {
+      const jobKey = normalizeForMatch(activeItem.projectName || activeItem.sourceTitle || activeItem.fileName);
       if (scoreMatchKey && jobKey && (jobKey.includes(scoreMatchKey) || scoreMatchKey.includes(jobKey))) return '';
-      return `Audio/Score mismatch: loaded score is "${project.name}", but selected audio belongs to "${selectedJob.projectName || selectedJob.sourceTitle || selectedJob.fileName}".`;
+      return `Audio/Score mismatch: loaded score is "${project.name}", but selected audio belongs to "${activeItem.projectName || activeItem.sourceTitle || activeItem.fileName}".`;
     }
     const audioName = normalizeForMatch(fileName);
     if (!scoreMatchKey || !audioName) return '';
     if (audioName.includes(scoreMatchKey) || scoreMatchKey.includes(audioName)) return '';
     return `Audio/Score mismatch: loaded score is "${project.name}", but selected audio is "${fileName}". Load the matching GP score for accurate busking sync.`;
-  }, [fileName, project.name, scoreMatchKey, selectedJob]);
+  }, [activeItem, fileName, project.name, scoreMatchKey]);
 
   const stopSyncTimer = () => {
     if (timerRef.current !== null) {
@@ -183,7 +158,7 @@ export function BuskingWorkflowPanel() {
     if (objectUrlRef.current && objectUrlRef.current !== url) releaseObjectUrl();
     player.crossOrigin = url.startsWith('blob:') ? '' : 'anonymous';
     player.src = url;
-    player.volume = 0.92;
+    player.volume = currentLink?.masterVolume ?? 0.92;
     player.playbackRate = 1;
     player.preservesPitch = true;
     player.load();
@@ -201,10 +176,9 @@ export function BuskingWorkflowPanel() {
   const loadRemoteAsBlob = async (url: string, name: string): Promise<boolean> => {
     setState('loading');
     setFileName(name);
-    setError('Loading rendered performance audio...');
+    setError('Loading master audio...');
     try {
-      const absoluteUrl = url.startsWith('http') ? url : `${getSoundServerUrl()}${url}`;
-      const response = await fetch(`${absoluteUrl}${absoluteUrl.includes('?') ? '&' : '?'}v=${Date.now()}`);
+      const response = await fetch(`${url}${url.includes('?') ? '&' : '?'}v=${Date.now()}`);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const blob = await response.blob();
       if (blob.size <= 44) throw new Error('Downloaded audio blob is empty.');
@@ -220,53 +194,23 @@ export function BuskingWorkflowPanel() {
   };
 
   const loadMaster = async (): Promise<boolean> => {
+    if (currentLink?.masterAudioUrl) {
+      return await loadRemoteAsBlob(currentLink.masterAudioUrl, currentLink.masterAudioFileName);
+    }
     if (!masterItem) {
       setState('error');
-      setError('No rendered master in current project. Select a generated master from the list or generate a new one.');
+      setError('No linked master audio. Select a master from the library or attach one to this score.');
       return false;
     }
     const url = masterItem.fileUrl;
     if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/outputs/')) {
-      return await loadRemoteAsBlob(url, masterItem.fileName);
+      return await loadRemoteAsBlob(url.startsWith('/outputs/') ? `${window.location.origin}${url}` : url, masterItem.fileName);
     }
     return await loadUrl(url, masterItem.fileName);
   };
 
   const refreshGeneratedFiles = async () => {
-    setIsRefreshingFiles(true);
-    try {
-      const response = await fetch(`${getSoundServerUrl()}/api/sound/jobs?v=${Date.now()}`);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const payload = await response.json() as { files?: string[]; items?: SoundJobItem[] };
-      if (payload.items && payload.items.length > 0) {
-        setGeneratedJobs(payload.items);
-      } else {
-        const fallbackJobs = (payload.files || []).filter((name) => name.toLowerCase().endsWith('.wav')).sort().reverse().map((name) => ({
-          fileName: name,
-          fileUrl: `/outputs/${name}`,
-          metadataFileName: null,
-          jobId: name,
-          engine: 'unknown',
-          projectId: '',
-          projectName: '',
-          sourceTitle: '',
-          sourceArtist: '',
-          bpm: 0,
-          key: '',
-          durationSeconds: 0,
-          sampleRate: 0,
-          createdAt: '',
-          message: '',
-          hasMetadata: false,
-        }));
-        setGeneratedJobs(fallbackJobs);
-      }
-      setError('');
-    } catch (e) {
-      setError(e instanceof Error ? `Generated list failed: ${e.message}` : 'Generated list failed.');
-    } finally {
-      setIsRefreshingFiles(false);
-    }
+    await refreshAudioLibrary();
   };
 
   const playLoadedAudio = async () => {
@@ -281,16 +225,18 @@ export function BuskingWorkflowPanel() {
     }
   };
 
-  const loadGeneratedJob = async (job: SoundJobItem, autoPlay: boolean = true) => {
-    const ok = await loadRemoteAsBlob(job.fileUrl || generatedFileUrl(job.fileName), job.fileName);
+  const loadGeneratedJob = async (item: MasterAudioItem, autoPlay: boolean = true) => {
+    selectAudioItem(item);
+    attachAudioToProject(item, transportPosition.endTick || 0);
+    const ok = await loadRemoteAsBlob(item.fileUrl, item.fileName);
     if (ok && autoPlay) await playLoadedAudio();
   };
 
   const loadLatestGeneratedFile = async (): Promise<boolean> => {
-    const candidate = matchedJobs[0] || generatedJobs[0];
-    if (candidate) return await loadRemoteAsBlob(candidate.fileUrl || generatedFileUrl(candidate.fileName), candidate.fileName);
+    const candidate = matchedJobs[0] || audioItems[0];
+    if (candidate) return await loadRemoteAsBlob(candidate.fileUrl, candidate.fileName);
     setState('error');
-    setError('No generated WAV files found. Refresh the generated masters list or generate Performance Sound first.');
+    setError('No master audio files found. Refresh the library or import/generate audio first.');
     return false;
   };
 
@@ -303,7 +249,7 @@ export function BuskingWorkflowPanel() {
 
     if (!player.src) {
       let loaded = false;
-      if (masterItem) loaded = await loadMaster();
+      loaded = await loadMaster();
       if (!loaded) loaded = await loadLatestGeneratedFile();
       if (!loaded) return;
     }
@@ -333,13 +279,14 @@ export function BuskingWorkflowPanel() {
   };
 
   useEffect(() => {
-    void refreshGeneratedFiles();
-  }, []);
+    void refreshAudioLibrary();
+    loadCurrentProjectLink();
+  }, [loadCurrentProjectLink, refreshAudioLibrary]);
 
   useEffect(() => {
-    if (masterItem && state === 'empty') void loadMaster();
+    if (currentLink?.masterAudioUrl && state === 'empty') void loadMaster();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [masterItem?.id]);
+  }, [currentLink?.masterAudioFileName]);
 
   useEffect(() => {
     return () => {
@@ -350,12 +297,12 @@ export function BuskingWorkflowPanel() {
     };
   }, []);
 
-  const renderJobButton = (job: SoundJobItem, isMatched: boolean) => (
-    <button key={job.fileName} onClick={() => void loadGeneratedJob(job, true)} className={`w-full text-left rounded border p-2 text-xs transition-colors ${fileName === job.fileName ? 'bg-blue-950/70 border-blue-600 text-blue-100' : isMatched ? 'bg-emerald-950/40 border-emerald-700/50 text-emerald-50 hover:bg-emerald-900/50' : 'bg-slate-900/90 border-slate-800 text-slate-300 hover:bg-slate-800'}`}>
-      <div className="truncate font-medium">{job.projectName || job.sourceTitle || job.fileName}</div>
-      <div className="truncate text-[10px] text-slate-500 mt-0.5">{job.fileName}</div>
+  const renderJobButton = (item: MasterAudioItem, isMatched: boolean) => (
+    <button key={item.fileName} onClick={() => void loadGeneratedJob(item, true)} className={`w-full text-left rounded border p-2 text-xs transition-colors ${fileName === item.fileName ? 'bg-blue-950/70 border-blue-600 text-blue-100' : isMatched ? 'bg-emerald-950/40 border-emerald-700/50 text-emerald-50 hover:bg-emerald-900/50' : 'bg-slate-900/90 border-slate-800 text-slate-300 hover:bg-slate-800'}`}>
+      <div className="truncate font-medium">{item.projectName || item.sourceTitle || item.fileName}</div>
+      <div className="truncate text-[10px] text-slate-500 mt-0.5">{item.fileName}</div>
       <div className="text-[10px] text-slate-500 mt-0.5">
-        {job.hasMetadata ? `${job.engine} · ${job.key || '-'} · ${job.bpm || '-'} BPM · ${job.durationSeconds ? formatTime(job.durationSeconds) : '--:--'}` : 'Legacy WAV · no metadata'}
+        {item.hasMetadata ? `${item.source} · ${item.key || '-'} · ${item.bpm || '-'} BPM · ${item.durationSeconds ? formatTime(item.durationSeconds) : '--:--'}` : 'Legacy WAV · no metadata'}
       </div>
     </button>
   );
@@ -386,10 +333,10 @@ export function BuskingWorkflowPanel() {
               <h1 className="text-xl font-bold text-white truncate">{project.name || currentPlan.title}</h1>
               <span className="text-xs text-slate-400 shrink-0">{currentPlan.recommendedKey} · Capo {currentPlan.capo} · {currentPlan.performanceBpm} BPM · {formatGoalLabel(currentPlan.goal)}</span>
             </div>
-            <div className="mt-1 text-[11px] text-slate-500 truncate">{fileName || 'Select a generated master from the list.'}</div>
+            <div className="mt-1 text-[11px] text-slate-500 truncate">{fileName || currentLink?.masterAudioFileName || 'Select or attach a master audio file.'}</div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <button onClick={() => void loadMaster()} disabled={!masterItem} className="h-9 px-3 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-100 text-xs flex items-center gap-1.5"><Music size={14} /> Current Master</button>
+            <button onClick={() => void loadMaster()} disabled={!currentLink && !masterItem} className="h-9 px-3 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-100 text-xs flex items-center gap-1.5"><Music size={14} /> Linked Master</button>
             <button onClick={() => void playPause()} className="h-10 px-5 rounded bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold flex items-center gap-2">{state === 'playing' ? <Pause size={15} /> : <Play size={15} />}{state === 'playing' ? 'Pause' : 'Play'}</button>
             <button onClick={stop} className="h-10 px-3 rounded bg-slate-800 hover:bg-slate-700 text-slate-100"><Square size={15} /></button>
             <button onClick={() => setMode('backing')} className="h-9 px-3 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-xs">Backing</button>
@@ -401,14 +348,14 @@ export function BuskingWorkflowPanel() {
           <div className="text-xs text-slate-400 w-24 text-right">State: {state}</div>
         </div>
         {mismatchWarning && <div className="mt-2 rounded border border-yellow-500/40 bg-yellow-950/40 px-2 py-1.5 text-[11px] text-yellow-100">{mismatchWarning}</div>}
-        {error && <div className="mt-2 rounded border border-red-500/40 bg-red-950/50 px-2 py-1.5 text-[11px] text-red-100">{error}</div>}
+        {(error || libraryError) && <div className="mt-2 rounded border border-red-500/40 bg-red-950/50 px-2 py-1.5 text-[11px] text-red-100">{error || libraryError}</div>}
       </div>
 
       <div className="absolute right-4 top-4 bottom-4 w-[380px] pointer-events-auto overflow-auto rounded-2xl border border-slate-700 bg-slate-950/88 backdrop-blur p-4 shadow-2xl">
         <div className="grid grid-cols-2 gap-3 mb-4">
           <div className="rounded-xl bg-slate-900 border border-slate-700 p-3">
-            <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">RenderCache</div>
-            <div className="text-lg font-bold text-white">{project.renderCache?.masterStatus || 'empty'}</div>
+            <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Linked Master</div>
+            <div className="text-sm font-bold text-white truncate">{currentLink?.masterAudioFileName || 'None'}</div>
           </div>
           <div className="rounded-xl bg-slate-900 border border-slate-700 p-3">
             <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Score Sync</div>
@@ -418,15 +365,15 @@ export function BuskingWorkflowPanel() {
 
         <section className="mb-4">
           <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2 text-sm font-semibold text-white"><Music size={15} /> Generated Masters</div>
+            <div className="flex items-center gap-2 text-sm font-semibold text-white"><Music size={15} /> Master Audio Library</div>
             <button onClick={() => void refreshGeneratedFiles()} className="h-7 px-2 rounded bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-200 flex items-center gap-1"><RefreshCw size={12} className={isRefreshingFiles ? 'animate-spin' : ''} /> Refresh</button>
           </div>
           <div className="space-y-1 max-h-64 overflow-auto pr-1">
-            {generatedJobs.length === 0 && <div className="rounded bg-slate-900/90 border border-slate-800 p-3 text-xs text-slate-500">No generated WAV files found yet.</div>}
+            {audioItems.length === 0 && <div className="rounded bg-slate-900/90 border border-slate-800 p-3 text-xs text-slate-500">No master audio files found yet.</div>}
             {matchedJobs.length > 0 && <div className="text-[10px] uppercase tracking-wider text-emerald-400 mt-1 mb-1">Matching current score</div>}
-            {matchedJobs.map((job) => renderJobButton(job, true))}
-            {otherJobs.length > 0 && <div className="text-[10px] uppercase tracking-wider text-slate-500 mt-3 mb-1">Other generated masters</div>}
-            {otherJobs.map((job) => renderJobButton(job, false))}
+            {matchedJobs.map((item) => renderJobButton(item, true))}
+            {otherJobs.length > 0 && <div className="text-[10px] uppercase tracking-wider text-slate-500 mt-3 mb-1">Other master audio</div>}
+            {otherJobs.map((item) => renderJobButton(item, false))}
           </div>
         </section>
 
